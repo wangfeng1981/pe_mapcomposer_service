@@ -27,7 +27,8 @@ SOURCES += main.cpp \
     wms/qgswmtsdimensions.cpp \
     wms/qgsxyzconnection.cpp \
     wms/qgsxyzconnectiondialog.cpp \
-    wms/qgsxyzsourceselect.cpp
+    wms/qgsxyzsourceselect.cpp \
+    ../sharedcodes/wstringutils.cpp
 
 
 HEADERS += \
@@ -44,7 +45,9 @@ HEADERS += \
     wms/qgswmtsdimensions.h \
     wms/qgsxyzconnection.h \
     wms/qgsxyzconnectiondialog.h \
-    wms/qgsxyzsourceselect.h
+    wms/qgsxyzsourceselect.h \
+    httplib.h \
+    ../sharedcodes/wstringutils.h
 
 
 #QGIS
@@ -70,6 +73,13 @@ CONFIG += crypto
 
 INCLUDEPATH += "/usr/include/gdal"
 
+
 LIBS += -L"/usr/local/lib/qgis/plugins" -lwmsprovider
 LIBS += -L"/usr/lib" -lgdal
+
+#zeromq
+INCLUDEPATH += "/usr/local/include"
+LIBS += -L"/usr/local/lib" -lzmq
+
+
 

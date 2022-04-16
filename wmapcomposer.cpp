@@ -1,11 +1,26 @@
 #include "wmapcomposer.h"
 
-WMapComposer::WMapComposer(string pedir,string resdir)
+WMapComposer::WMapComposer(QString pedir,QString resdir)
 {
     m_project = nullptr ;
-    m_pedir = QString::fromStdString(pedir) ;
-    m_layoutResDir = QString::fromStdString(resdir) ;
+    m_pedir = pedir ;
+    m_layoutResDir = resdir ;
     qDebug()<<"using pedir:"<<m_pedir  ;
+
+    //make subdir of pedir/omc_out/
+    m_omcOutDirAbsPath = m_pedir + "omc_out/" ;
+    {
+        QDir omcOutDir(m_omcOutDirAbsPath) ;
+        if( omcOutDir.exists()==false ){
+            qDebug()<<"try to create subdir: "<<m_omcOutDirAbsPath ;
+            bool mkgood = omcOutDir.mkdir(m_omcOutDirAbsPath) ;
+            if( mkgood==false ){
+                qDebug()<<"Critical : make omc_out subdir failed. exit(13)" ;
+                exit(13) ;
+            }
+        }
+        qDebug()<<"omc_out is ok:" << m_omcOutDirAbsPath ;
+    }
 }
 
 /// one method one line...
@@ -22,11 +37,10 @@ string WMapComposer::getMethodAPIs()
     out += "layout.addrect:file,\n" ;
     out += "layout.addell:file,\n" ;
     out += "layout.addarrow:file,\n" ;
-    out += "layout.exportparts:file,outfile,dpi\n" ;
     out += "project.addwms:file,\n" ;
     out += "project.addvec:file,vecname,vecfile\n" ;
-    out += "project.new:file\n" ;
-    out += "project.export:file,outfile,dpi\n" ;
+    out += "project.new:\n" ;
+    out += "project.export:file,dpi\n" ;
     out += "--- methods end   ---\n" ;
     return out ;
 }
@@ -39,68 +53,69 @@ string WMapComposer::getMethodAPIs()
 /// \param error
 /// \return 0 allok , others failed just read error.
 ///
-int WMapComposer::run(string method,QString& jsondata, string& error)
+int WMapComposer::run(string method,QString& jsondata,string& outJsonData, string& error)
 {
+    outJsonData = "{}" ;
     if( method == "project.new" ){
-        return this->projectNew(jsondata , error) ;
+        return this->projectNew(jsondata , outJsonData, error) ;
     }
     else if( method=="project.addwms")
     {
-        return this->projectAddWms(jsondata,error) ;
+        return this->projectAddWms(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addmap" ){
-        return this->layoutAddMap(jsondata,error) ;
-    }
-    else if( method=="layout.exportparts"){
-        return this->layoutExportParts(jsondata,error) ;
+        return this->layoutAddMap(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addlabel")
     {
-        return this->layoutAddLabel(jsondata, error) ;
+        return this->layoutAddLabel(jsondata, outJsonData, error) ;
     }
     else if( method=="layout.addimage"){
-        return this->layoutAddImage(jsondata,error) ;
+        return this->layoutAddImage(jsondata, outJsonData,error) ;
     }
     else if( method == "layout.addlegend" ){
-        return this->layoutAddLegend(jsondata,error) ;
+        return this->layoutAddLegend(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addnorth")
     {
-        return this->layoutAddNorth(jsondata,error) ;
+        return this->layoutAddNorth(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addscalebar")
     {
-        return this->layoutAddScaleBar(jsondata,error) ;
+        return this->layoutAddScaleBar(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addrect"){
-        return this->layoutAddRect(jsondata,error) ;
+        return this->layoutAddRect(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addell"){
-        return this->layoutAddEll(jsondata,error) ;
+        return this->layoutAddEll(jsondata, outJsonData,error) ;
     }
     else if( method=="layout.addarrow"){
-        return this->layoutAddArrow(jsondata,error) ;
+        return this->layoutAddArrow(jsondata, outJsonData,error) ;
     }
     else if(method=="project.addvec")
     {
-        return this->projectAddVec(jsondata,error) ;
+        return this->projectAddVec(jsondata, outJsonData,error) ;
     }
     else if(method=="project.export")
     {
-        return this->projectExport(jsondata,error) ;
+        return this->projectExport(jsondata, outJsonData,error) ;
     }
-
+    error = "not supported method:'"+method+"'." ;
     cout<<"not supported method:"<<method<<endl ;
     return 9 ;
 }
 
-int WMapComposer::checkAndResetProjectFile(string& newfile,string& error)
+int WMapComposer::checkAndResetProjectFile( string& relnewfile ,string& error)
 {
+    /// 这里Qgis project文件中的 fileName是完整qgs文件路径，但是返回前端的时候pedir下面的相对路径，注意这一点
+    ///
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
-    if( newfile=="" ){
+    if( relnewfile=="" ){
         error = "empty new file." ;
         return 1 ;
     }
+    string newfile = m_pedir.toStdString()+relnewfile ;
     if( newfile != this->m_project->fileName().toStdString() ){
         if( this->m_project->fileName().length()!=0 ) this->m_project->write() ;
         this->m_project->clear() ;
@@ -115,19 +130,13 @@ int WMapComposer::checkAndResetProjectFile(string& newfile,string& error)
 
 
 
-int WMapComposer::projectNew(QString& jsondata,string& error)
+int WMapComposer::projectNew(QString& jsondata, string& outJsonData,string& error)
 {
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
     QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
     if( jdoc.isNull() ){
         error="failed parser json.";
         return 1;
-    }
-    string filepath = jdoc.object().value("file").toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
-        return 2 ;
     }
 
     string oldfilename = this->m_project->fileName().toStdString() ;
@@ -138,6 +147,24 @@ int WMapComposer::projectNew(QString& jsondata,string& error)
     }
 
     this->m_project->clear();
+
+    //create daily subdir
+    QString ymdStr = QDate::currentDate().toString("yyyyMMdd") ;
+    QString dayDirAbs ;
+    {
+        dayDirAbs = m_omcOutDirAbsPath + ymdStr + "/" ;
+        QDir qdir(dayDirAbs) ;
+        if( qdir.exists() ==false ){
+            qDebug()<<"try to make day dir:"<<dayDirAbs ;
+            bool mkdirok = qdir.mkdir(dayDirAbs) ;
+            if( mkdirok==false ){
+                qDebug()<<"Critical : failed to make day dir:"<<dayDirAbs<<". exit(14)." ;
+                exit(14) ;
+            }
+        }
+    }
+    QString newqgsfilename =dayDirAbs + QTime::currentTime().toString("HHmmss") + "-" + QString::number(qrand()%10000).rightJustified(4,'0') + ".qgs" ;
+
 
     //新建一个layout
 
@@ -156,18 +183,21 @@ int WMapComposer::projectNew(QString& jsondata,string& error)
         return 4 ;
     }
 
-    cout<<"newfilename:"<<filepath<<endl ;
-    bool wok = this->m_project->write(filepath.c_str() ) ;
+    qDebug()<<"newfilename:"<<newqgsfilename  ;
+    bool wok = this->m_project->write(newqgsfilename  ) ;
     if( wok==false ){
         error = "failed to write new file." ;
         return 3 ;
     }
 
+    QString relNewfilename = newqgsfilename.replace(m_pedir,"") ;
+    outJsonData = "{\"file\":\""+relNewfilename.toStdString()+"\"}" ;
+
     return 0 ;
 }
 
 
-int WMapComposer::projectAddWms(QString& jsondata,string& error)
+int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string& error)
 {
     // JSON //////////////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -176,13 +206,13 @@ int WMapComposer::projectAddWms(QString& jsondata,string& error)
         error="failed parser json.";
         return 1;
     }
-    string filepath = jdoc.object().value("file").toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jdoc.object().value("file").toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     QgsDataSourceUri uri1;
@@ -199,7 +229,7 @@ int WMapComposer::projectAddWms(QString& jsondata,string& error)
     //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20190601000000" );
     qDebug()<<uri1.encodedUri();
 
-    QgsRasterLayer* rlayer = new QgsRasterLayer( uri1.encodedUri() ,"layer1","wms") ;
+    QgsRasterLayer* rlayer = new QgsRasterLayer( uri1.encodedUri() ,"wmslayer","wms") ;
     if( rlayer->isValid() )
     {
         qDebug()<<"rlayer good";
@@ -219,12 +249,13 @@ int WMapComposer::projectAddWms(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"lyrid\":\""+rlayer->id().toStdString()+"\"}" ;
 
     return 0 ;
 }
 
 
-int WMapComposer::layoutAddMap(QString& jsondata,string& error)
+int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -233,13 +264,13 @@ int WMapComposer::layoutAddMap(QString& jsondata,string& error)
         error="failed parser json.";
         return 1;
     }
-    string filepath = jdoc.object().value("file").toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jdoc.object().value("file").toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;// jroot["left"].as<double>() ;
@@ -272,74 +303,42 @@ int WMapComposer::layoutAddMap(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
-
-
-    return 0 ;
-}
-
-
-int WMapComposer::layoutExportParts(QString& jsondata,string& error)
-{
-    // json and project ////////////////////////////
-    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
-    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
-    if( jdoc.isNull() ){
-        error="failed parser json.";
-        return 1;
-    }
-    QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
-        return 2 ;
-    }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
-    if( code1 != 0 ) return code1 ;
-
-
-    string outfile = jroot["outfile"].toString().toStdString();
-    cout<<"outfile:"<<outfile<<endl ;
-
-    int dpi = jroot["dpi"].toInt() ;
-    if( dpi==0 ) dpi = 72 ;
-    cout<<"dpi:"<<dpi<<endl ;
-
-    // //////////////////////////////////////////////
-
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
-    if( layout==nullptr ){
-        error = "failed to get layout pointer." ;
-        return 12 ;
-    }
-
-    QList<QgsLayoutItem*> loItems ;
-    layout->layoutItems(loItems) ;
-
-    int iitem = 0 ;
-    for(auto it = loItems.begin() ; it != loItems.end() ; ++ it )
-    {
-        stringstream ss ;
-        ss<<outfile<<"-"<<(++iitem)<<".png" ;
-        string outname1 = ss.str() ;
-        renderMapItem( *it , outname1 , dpi , layout, loItems) ;
-    }
-
-
-
-
+    outJsonData = "{\"uuid\":\""+mapItem->uuid().toStdString()+"\"}" ;
 
     return 0 ;
 }
 
-int WMapComposer::renderMapItem(QgsLayoutItem* oneItem,string filename, int dpi,
-                                QgsLayout* pLayout, QList<QgsLayoutItem*>& itemList )
+
+//int WMapComposer::layoutExportParts( QgsPrintLayout* layout,int dpi, string absoutfilenameroot, string& error)
+//{
+//    if( layout==nullptr ){
+//        error = "failed to get layout pointer." ;
+//        return 12 ;
+//    }
+
+//    QList<QgsLayoutItem*> loItems ;
+//    layout->layoutItems(loItems) ;
+
+//    int iitem = 0 ;
+//    for(auto it = loItems.begin() ; it != loItems.end() ; ++ it )
+//    {
+//        stringstream ss ;
+//        ss<<absoutfilenameroot<<"-"<<(++iitem)<<".png" ;
+//        string absoutname1 = ss.str() ;
+//        renderMapItem( *it , absoutname1 , dpi , layout, loItems) ;
+//    }
+
+//    return 0 ;
+//}
+
+int WMapComposer::renderMapItem(QgsLayoutItem* oneItem,string absfilename, int dpi,
+                                QgsLayout* pLayout )
 {
-    //hide all but this item, and then reset visible
-    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
-    {
-        (*it)->setVisibility(false);
-    }
+//    //hide all but this item, and then reset visible
+//    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
+//    {
+//        (*it)->setVisibility(false);
+//    }
 
 
     oneItem->setVisibility(true);
@@ -349,18 +348,18 @@ int WMapComposer::renderMapItem(QgsLayoutItem* oneItem,string filename, int dpi,
     QImage outImage = exporter.renderRegionToImage( mapRegion,
                                            QSize(),
                                            dpi ) ;
-    outImage.save( filename.c_str()) ;
+    outImage.save( absfilename.c_str()) ;
 
-    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
-    {
-        (*it)->setVisibility(true);
-    }
+//    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
+//    {
+//        (*it)->setVisibility(true);
+//    }
 
     return 0 ;
 }
 
 
-int WMapComposer::layoutAddLabel(QString& jsondata,string& error)
+int WMapComposer::layoutAddLabel(QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -370,13 +369,13 @@ int WMapComposer::layoutAddLabel(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -409,14 +408,14 @@ int WMapComposer::layoutAddLabel(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
-
+    outJsonData = "{\"uuid\":\""+label->uuid().toStdString()+"\"}" ;
 
     return 0 ;
 }
 
 
 /// file,left,top,width,height,mapuuid
-int WMapComposer::layoutAddScaleBar(QString& jsondata,string& error)
+int WMapComposer::layoutAddScaleBar(QString& jsondata  , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -426,13 +425,13 @@ int WMapComposer::layoutAddScaleBar(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -473,10 +472,12 @@ int WMapComposer::layoutAddScaleBar(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+scalebar->uuid().toStdString()+"\"}" ;
+
     return 0 ;
 }
 
-QgsLayoutItem* WMapComposer::findLayoutItemByUuid(QgsLayout* layout,string uuid)
+QgsLayoutItem* WMapComposer::findLayoutItemByUuid(QgsLayout* layout ,string uuid)
 {
     QString uuid1(uuid.c_str()) ;
     QList<QgsLayoutItem*> itemList ;
@@ -492,7 +493,7 @@ QgsLayoutItem* WMapComposer::findLayoutItemByUuid(QgsLayout* layout,string uuid)
 
 
 /// file,left,top,width,height,mapuuid
-int WMapComposer::layoutAddLegend(QString& jsondata,string& error)
+int WMapComposer::layoutAddLegend(QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -502,13 +503,13 @@ int WMapComposer::layoutAddLegend(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -551,6 +552,8 @@ int WMapComposer::layoutAddLegend(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+item->uuid().toStdString()+"\"}" ;
+
     return 0 ;
 }
 
@@ -559,7 +562,7 @@ int WMapComposer::layoutAddLegend(QString& jsondata,string& error)
 
 
 /// file,left,top,width,height,relsrc
-int WMapComposer::layoutAddImage(QString& jsondata,string& error)
+int WMapComposer::layoutAddImage(QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -569,13 +572,13 @@ int WMapComposer::layoutAddImage(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -613,6 +616,8 @@ int WMapComposer::layoutAddImage(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+item->uuid().toStdString()+"\"}" ;
+
     return 0 ;
 }
 
@@ -621,7 +626,7 @@ int WMapComposer::layoutAddImage(QString& jsondata,string& error)
 
 
 /// file,left,top,width,height
-int WMapComposer::layoutAddNorth(QString& jsondata,string& error)
+int WMapComposer::layoutAddNorth(QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -631,13 +636,13 @@ int WMapComposer::layoutAddNorth(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -683,32 +688,35 @@ int WMapComposer::layoutAddNorth(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+item->uuid().toStdString()+"\"}" ;
+
+
     return 0 ;
 
 }
 
 
-int WMapComposer::layoutAddArrow(QString& jsondata,string& error)
+int WMapComposer::layoutAddArrow(QString& jsondata , string& outJsonData ,string& error)
 {
-    return this->layoutAddRectEllArrow("arrow" , jsondata, error) ;
+    return this->layoutAddRectEllArrow("arrow" , jsondata,outJsonData, error) ;
 }
 
 
-int WMapComposer::layoutAddRect(QString& jsondata,string& error)
+int WMapComposer::layoutAddRect(QString& jsondata , string& outJsonData ,string& error)
 {
-    return this->layoutAddRectEllArrow("rect" , jsondata, error) ;
+    return this->layoutAddRectEllArrow("rect" , jsondata,outJsonData, error) ;
 }
 
 
-int WMapComposer::layoutAddEll(QString& jsondata,string& error)
+int WMapComposer::layoutAddEll(QString& jsondata , string& outJsonData ,string& error)
 {
-    return this->layoutAddRectEllArrow("ell" , jsondata, error) ;
+    return this->layoutAddRectEllArrow("ell" , jsondata,outJsonData, error) ;
 }
 
 
 
 /// file,left,top,width,height
-int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata,string& error)
+int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -718,13 +726,13 @@ int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata,strin
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     double left = 0;//jroot["left"].as<double>() ;
@@ -796,6 +804,8 @@ int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata,strin
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+item->uuid().toStdString()+"\"}" ;
+
     return 0 ;
 }
 
@@ -805,7 +815,7 @@ int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata,strin
 /// \param error
 /// \return
 ///
-int WMapComposer::projectAddVec(QString& jsondata,string& error)
+int WMapComposer::projectAddVec(QString& jsondata , string& outJsonData , string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -815,13 +825,13 @@ int WMapComposer::projectAddVec(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
     QString vecfile = jroot["vecfile"].toString() ;
@@ -865,6 +875,8 @@ int WMapComposer::projectAddVec(QString& jsondata,string& error)
         return 3 ;
     }
     // ///////////////////////////////////////
+    outJsonData = "{\"lyrid\":\""+veclayer->id().toStdString()+"\"}" ;
+
     return 0 ;
 }
 
@@ -872,19 +884,12 @@ int WMapComposer::projectAddVec(QString& jsondata,string& error)
 
 
 
-// outjsonfile is full absfilepath
-int WMapComposer::exportProjectJsonFile(QString outjsonfile, QString outfileroot, string& error)
+//
+int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutfilenameroot,int dpi, string& outJsonData, string& error)
 {
     if( m_project==nullptr ){
         error = "empty project." ;
         return 0 ;
-    }
-
-
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
-    if( layout==nullptr ){
-        error = "failed to get layout pointer." ;
-        return 12 ;
     }
 
     QJsonArray layerArr ;
@@ -920,13 +925,21 @@ int WMapComposer::exportProjectJsonFile(QString outjsonfile, QString outfileroot
     QList<QgsLayoutItem*> loItems ;
     layout->layoutItems(loItems) ;
 
+    //hide all for render every single one.
+    for( QList<QgsLayoutItem*>::iterator  it = loItems.begin() ; it != loItems.end() ; ++ it )
+    {
+        (*it)->setVisibility(false);
+    }
+
     for(auto it = loItems.begin(); it != loItems.end(); ++ it )
     {
         ++ loiIndex ;
-        QString relPngFile = outfileroot + "-" + QString::number(loiIndex) + ".png";
+        QString relPngFile = reloutfilenameroot + "-" + QString::number(loiIndex) + ".png";
+        QString absPngFile = m_pedir + relPngFile ;
+
+
 
         QJsonObject itemJsonObj  ;
-        itemJsonObj.insert("png" , QJsonValue(relPngFile)) ;
 
         QJsonObject lo_obj = extractLayoutItemData(*it) ;
         itemJsonObj.insert("layoutitem", lo_obj) ;
@@ -1064,19 +1077,32 @@ int WMapComposer::exportProjectJsonFile(QString outjsonfile, QString outfileroot
         }
 
         if( itemok==true ){
+
+            renderMapItem( *it , absPngFile.toStdString() , dpi , (QgsLayout*)layout ) ;
+            itemJsonObj.insert("png" , relPngFile ) ;
+
             layoutitemsArray.append( itemJsonObj );
         }
     }
 
+    //restore all visibility for render every single one.
+    for( QList<QgsLayoutItem*>::iterator  it = loItems.begin() ; it != loItems.end() ; ++ it )
+    {
+        (*it)->setVisibility(true);
+    }
+
     QJsonObject projJsonObj ;
-    projJsonObj.insert("file" , QJsonValue(m_project->fileName()) ) ;
+    projJsonObj.insert("file" , m_project->fileName().replace(m_pedir,"") ) ;
     projJsonObj.insert("loitem_array" ,layoutitemsArray ) ;
     projJsonObj.insert("layer_array" , layerArr ) ;
 
+
     QJsonDocument jdoc( projJsonObj ) ;
 
-    QByteArray bytes = jdoc.toJson( QJsonDocument::Indented );
-    QFile file( outjsonfile );
+    QByteArray bytes = jdoc.toJson( QJsonDocument::Compact ) ;
+    QString relProjFile = reloutfilenameroot + ".json" ;
+    QString absProjFile = m_pedir+relProjFile ;
+    QFile file( absProjFile );
     if( file.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate ) )
     {
         QTextStream iStream( &file );
@@ -1086,15 +1112,17 @@ int WMapComposer::exportProjectJsonFile(QString outjsonfile, QString outfileroot
     }
     else
     {
-        error = "failed to open outjsonfile." ;
+        error = "failed to open absProjFile for writing." ;
         return 13;
     }
+
+    outJsonData = "{\"projfile\":\""+relProjFile.toStdString()+"\"}" ;
 
     return 0;
 }
 
-/// file,outfile,dpi
-int WMapComposer::projectExport(QString& jsondata,string& error)
+/// file,dpi
+int WMapComposer::projectExport(QString& jsondata , string& outJsonData ,string& error)
 {
     // json and project ////////////////////////////
     if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
@@ -1104,32 +1132,30 @@ int WMapComposer::projectExport(QString& jsondata,string& error)
         return 1;
     }
     QJsonObject jroot = jdoc.object() ;
-    string filepath = jroot["file"].toString().toStdString() ;
-    cout<<"file:"<<filepath<<endl ;
-    if(filepath==""){
-        error = "empty filepath." ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
         return 2 ;
     }
-    int code1 = checkAndResetProjectFile(filepath , error ) ;
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
-    QString outfile = jroot["outfile"].toString() ;
-    if( outfile.length()==0 ){
-        error = "empty outfile" ;
-        return 3 ;
-    }
-
-    qDebug()<<"outfile:"<<outfile ;
+    int dpi = jroot["dpi"].toInt() ;
+    if( dpi==0 ) dpi = 72 ;
+    cout<<"dpi:"<<dpi<<endl ;
 
     // //////////////////////////////////////////////
 
-    QString outjsonfile = outfile + ".json" ;
-
-    int ret0 = this->layoutExportParts(jsondata, error) ;
-    if( ret0!=0 ){
-        return ret0 ;
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
     }
-    int ret1 = this->exportProjectJsonFile(outjsonfile, outfile ,error ) ;
+
+    QString reloutnameroot = QString::fromStdString(relfilepath) + "-" + QTime::currentTime().toString("HHmmss") ;
+
+    int ret1 = this->exportProjectJsonFile( layout, reloutnameroot , dpi , outJsonData ,error) ;
 
 
     // SAVE //////////////////////////////////

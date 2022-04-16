@@ -1,7 +1,7 @@
 #include <QCoreApplication>
 /// 在线作图后台程序 2022-4-13
-///
-///
+/// 使用http POST 服务模拟一个RPC 参数为两个一个method字符串类型，一个jsondata是转为字符串的json对象
+/// 返回信息统一使用json {state:0 , message:'may some error msg' , data:{...} }
 
 
 #define _USE_MATH_DEFINES // for C++
@@ -49,15 +49,24 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
-
+#include <QStringList>
 
 #include "ajson5.h"
 #include "wmapcomposer.h"
+#include "httplib.h"
+#include <zmq.h>
+
+#include "../sharedcodes/wstringutils.h"
 
 
 using namespace std;
+using namespace httplib;
 
-bool loadTask17Config(QString configfile, QString& retPeDir , QString& retResDir)
+int g_httpPort = 15911 ;//default, this will be reset by task17config.json
+int g_zmqPort = 15922 ;//default
+string g_methodSeparator = ";;-;;-;;" ;
+
+bool loadTask17Config(QString configfile, QString& retPeDir , QString& retResDir , QString& retPort,QString& retZmqPort)
 {
     QFile file(configfile) ;
     if( file.open( QFile::OpenModeFlag::ReadOnly )==false ){
@@ -70,8 +79,60 @@ bool loadTask17Config(QString configfile, QString& retPeDir , QString& retResDir
     QJsonDocument jdoc = QJsonDocument::fromJson(filetext.toUtf8()) ;
     retPeDir = jdoc.object()["pedir"].toString() ;
     retResDir = jdoc.object()["omc_resdir"].toString();
-
+    retPort = jdoc.object()["omc_port"].toString() ;
+    retZmqPort = jdoc.object()["omc_zmqport"].toString() ;
     return true ;
+}
+
+
+void runHttp()
+{
+    qDebug()<<"in http threading..." ;
+    Server omcHttpServer ;
+
+    QString zmqPortStr = QString::number(g_zmqPort) ;
+
+    void *httpcontext = zmq_ctx_new ();
+    void *httprequester = zmq_socket (httpcontext, ZMQ_REQ);
+
+    string address =string("tcp://localhost:")+ zmqPortStr.toStdString() ;
+    int rc2 = zmq_connect (httprequester,  address.c_str() );
+    cout<<"http connect rc:"<<rc2<<endl ;
+
+    omcHttpServer.Post("/", [&](const Request& req,Response& res){
+        cout<<"--- new request ---"<<endl ;
+
+        string method = req.get_file_value("method").content ;
+        string jsondata = req.get_file_value("data").content ;
+        if( method=="" || jsondata=="" || jsondata[0]!='{' || jsondata.back()!='}' ){
+            cout<<"no method or data or bad data as json."<<endl ;
+            res.set_content("{\"state\":1,\"message\":\"no method or data or bad data as json.\",\"data\":{}}" , "application/json");
+        }else{
+            string methodandjsondata = method+g_methodSeparator+jsondata ;
+            char buffer [2048];
+            cout<<"sending "<<method<<endl ;
+            int rc101 = zmq_send (httprequester, methodandjsondata.c_str() , methodandjsondata.size() , 0);
+            if( rc101 <= 0 ){
+                res.set_content("{\"state\":2,\"message\":\"service is too busy, please retry later.\",\"data\":{}}" , "application/json");
+            }else{
+                int trecvbytesize = zmq_recv (httprequester, buffer, 2048, 0);
+                if( trecvbytesize<=0 ){
+                    res.set_content("{\"state\":3,\"message\":\"service is corrupted, please retry later.\",\"data\":{}}" , "application/json");
+                }else{
+                    cout<<"recving "<<method<<endl ;
+                    buffer[min(trecvbytesize,2047)] = '\0' ;
+                    string outjsondata = string(buffer) ;
+                    res.set_content(outjsondata , "application/json");
+                    cout<<"send http and this call ok."<<method<<endl ;
+                }
+            }
+        }
+    }) ;
+
+    qDebug()<<"http server running at 0.0.0.0:"<<g_httpPort<<"..." ;
+    omcHttpServer.listen("0.0.0.0" , g_httpPort ) ;
+
+    cout<<"http threading out."<<endl ;
 }
 
 
@@ -83,6 +144,7 @@ int main(int argc, char *argv[])
     cout<<"This program will create oms_out dir under pedir for output jsons and pngs."<<endl ;
     cout<<"v0.0.0 created."<<endl ;
     cout<<"v0.0.1 "<<endl ;
+    cout<<"v0.0.2 2022-4-16"<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
@@ -102,53 +164,72 @@ int main(int argc, char *argv[])
     }
 
     QString task17configfile = argv[1] ;
-    QString peDir , resDir ;
-    bool jsonok = loadTask17Config(task17configfile, peDir, resDir) ;
+    QString peDir , resDir , httpPort , zmqPort ;
+    bool jsonok = loadTask17Config(task17configfile, peDir, resDir , httpPort, zmqPort ) ;
     if( jsonok==false ){
         cout<<"parse config json failed."<<endl ;
         return 12 ;
     }
-    qDebug()<<"pedir,omc_resdir:"<<peDir<<","<<resDir<<endl ;
+    qDebug()<<"pedir,omc_resdir,omc_port:"<<peDir<<","<<resDir<<","<<httpPort<<endl ;
+    qDebug()<<"zmqPort:"<<zmqPort ;
 
-    //make subdir of pedir/omc_out/
-    QString omcOutDirPath = peDir + "omc_out" ;
-    {
-        QDir omcOutDir(omcOutDirPath) ;
-        if( omcOutDir.exists()==false ){
-            qDebug()<<"try to create subdir: "<<omcOutDirPath ;
-            bool mkgood = omcOutDir.mkdir(omcOutDirPath) ;
-            if( mkgood==false ){
-                qDebug()<<"make omc_out subdir failed." ;
-                return 13 ;
-            }
-        }
-        qDebug()<<"omc_out is ok:" << omcOutDirPath ;
+    g_httpPort = httpPort.toInt() ;
+    g_zmqPort = zmqPort.toInt() ;
+
+
+    WMapComposer mapComposer(peDir , resDir ) ;
+
+
+    void *mainContext = zmq_ctx_new ();
+    void *mainResponder = zmq_socket (mainContext, ZMQ_REP);
+    string address0 = string("tcp://*:") + zmqPort.toStdString() ;
+    int   mainRc = zmq_bind (mainResponder, address0.c_str() );
+    if( mainRc != 0 ){
+        cout<<"main zeromq bind failed."<<endl ;
+        return 15 ;
     }
 
+    //run http server
+    cout<<"start http server threading..."<<endl ;
+    std::thread httpThread(runHttp) ;
 
+    cout<<"continue main threading..."<<endl ;
 
-    WMapComposer mapComposer("./" , "./layout_res/") ;
 
     while(true){
-
-        cout<<mapComposer.getMethodAPIs()<<endl ;
-
-        cout<<"method:"<<endl ;
-        string method ;
-        cin>>method ;
-        cout<<"jsondata:"<<endl ;
-
-
-        QTextStream textStream(stdin) ;
-        QString jsondata ;
-        textStream>>jsondata ;
-
-        cout<<"run "<<method<<endl ;
-        string runerror ;
-        int runcode = mapComposer.run(method,jsondata,runerror) ;
-        cout<<"run return code:"<<runcode<<endl ;
-        if( runcode!=0 ){
-            cout<<"run error:"<<runerror<<endl ;
+        char buffer[2048] ;
+        cout<<"main wainting."<<endl ;
+        int recvbytesize = zmq_recv (mainResponder, buffer, 2048, 0);
+        if( recvbytesize<=0 ){
+            string outjsondata = "{\"state\":4,\"message\":\"bad params.\",\"data\":{}}" ;
+            zmq_send (mainResponder, outjsondata.c_str() , outjsondata.size() , 0);
+        }else{
+            buffer[min(recvbytesize,2047)] = '\0' ;
+            cout<<"main recv buffer:"<<buffer<<endl ;
+            string outjsondata = "" ;
+            QString fullstr = QString::fromUtf8(buffer) ;
+            QStringList strArr = fullstr.split( QString::fromStdString(g_methodSeparator) ) ;
+            if( strArr.size()!=2 ){
+                outjsondata = "{\"state\":1,\"message\":\"splited strArr.size not 2.\",\"data\":{}}" ;
+            }else{
+                string method = strArr[0].toStdString() ;
+                QString jsondata = strArr[1];
+                if( method=="" || jsondata=="" ){
+                    outjsondata = "{\"state\":1,\"message\":\"no method or data.\",\"data\":{}}"  ;
+                }else{
+                    cout<<"method:"<<method<<endl ;
+                    string runError ;
+                    string outJsonDataText ;
+                    qDebug()<<"jsondata:"<<jsondata ;
+                    int runcode = mapComposer.run(method , jsondata , outJsonDataText , runError ) ;
+                    QString fullOutJsonText = QString("{")
+                            + "\"state\":" + QString::number(runcode) + ","
+                            + "\"message\":" + "\"" + QString::fromStdString(runError) + "\","
+                            + "\"data\":" +  QString::fromStdString(outJsonDataText) + "}" ;
+                    outjsondata = fullOutJsonText.toStdString() ;
+                }
+            }
+            zmq_send (mainResponder, outjsondata.c_str() , outjsondata.size() , 0);
         }
     }
 

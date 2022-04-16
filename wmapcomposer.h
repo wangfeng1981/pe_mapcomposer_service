@@ -43,6 +43,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
+#include <QDate>
+#include <QTime>
+#include <QDateTime>
 
 
 
@@ -53,7 +56,13 @@ using namespace ArduinoJson;
 class WMapComposer
 {
 public:
-    WMapComposer(QString pedir, QString omcoutdir, QString omcresdir );/// here here
+
+    ///
+    /// \brief WMapComposer
+    /// \param pedir 是nginx pe目录的完整路径
+    /// \param omcresdir
+    ///
+    WMapComposer(QString pedir, QString omcresdir );/// here here
 
     ///
     /// \brief run
@@ -62,9 +71,9 @@ public:
     /// \param error
     /// \return 0 allok , others failed just read error.
     ///
-    int run(string method,QString& jsondata, string& error) ;
+    int run(string method,QString& jsondata,string& outJsonData, string& error) ;
 
-    int projectNew(QString& jsondata,string& error) ;
+    int projectNew(QString& jsondata,string& outJsonData,string& error) ;
 
     ///
     /// \brief projectAddWms support wQStringms,wmts
@@ -72,39 +81,33 @@ public:
     /// \param error
     /// \return
     ///
-    int projectAddWms(QString& jsondata,string& error) ;
+    int projectAddWms(QString& jsondata,string& outJsonData,string& error) ;
 
     /// file,left,top,width,height
-    int layoutAddMap(QString& jsondata,string& error) ;
+    int layoutAddMap(QString& jsondata,string& outJsonData,string& error) ;
     /// file,left,top,width,height,text
-    int layoutAddLabel(QString& jsondata,string& error) ;
+    int layoutAddLabel(QString& jsondata,string& outJsonData,string& error) ;
     /// file,left,top,width,height,mapuuid
-    int layoutAddScaleBar(QString& jsondata,string& error);
+    int layoutAddScaleBar(QString& jsondata,string& outJsonData,string& error);
     /// file,left,top,width,height,mapuuid
-    int layoutAddLegend(QString& jsondata,string& error) ;
+    int layoutAddLegend(QString& jsondata,string& outJsonData,string& error) ;
     /// file,left,top,width,height,relsrc
-    int layoutAddImage(QString& jsondata,string& error) ;
+    int layoutAddImage(QString& jsondata,string& outJsonData,string& error) ;
     /// file,left,top,width,height
-    int layoutAddNorth(QString& jsondata,string& error) ;
+    int layoutAddNorth(QString& jsondata,string& outJsonData,string& error) ;
 
     /// file,left,top,width,height
     ///
-    int layoutAddRect(QString& jsondata,string& error) ;
-    int layoutAddEll(QString& jsondata,string& error) ;
-    int layoutAddArrow(QString& jsondata,string& error) ;
+    int layoutAddRect(QString& jsondata,string& outJsonData,string& error) ;
+    int layoutAddEll(QString& jsondata,string& outJsonData,string& error) ;
+    int layoutAddArrow(QString& jsondata,string& outJsonData,string& error) ;
 
     /// file,vecname,vecfile(geojson or shp)
-    int projectAddVec(QString& jsondata,string& error) ;
-    /// file,outfile,dpi
-    int projectExport(QString& jsondata,string& error) ;
+    int projectAddVec(QString& jsondata,string& outJsonData,string& error) ;
+    /// file,dpi
+    int projectExport(QString& jsondata,string& outJsonData,string& error) ;
 
-    ///
-    /// \brief exportParts 每个地图元素单独导出一个图片，并将图片地址和Rect信息写在json文件中
-    /// \param jsondata
-    /// \param error
-    /// \return
-    ///
-    int layoutExportParts(QString& jsondata,string& error) ;
+
 
 
 
@@ -115,15 +118,19 @@ private:
     QgsProject* m_project ;
     QString m_pedir ;//在pedir目录下面建立 layout 文件夹，里面临时文件按日期建子目录，子目录下面为 {hhmmss}-{rrrr}.xxx文件
     QString m_layoutResDir ;//资源目录
-    int checkAndResetProjectFile(string& newfile,string& error) ;
-    int renderMapItem(QgsLayoutItem* oneItem,string filename, int dpi,
-                      QgsLayout* pLayout, QList<QgsLayoutItem*>& itemList) ;
+    ///
+    /// \brief m_omcOutDirAbsPath 输出绝对路径带/
+    ///
+    QString m_omcOutDirAbsPath ; //
+    int checkAndResetProjectFile( string& relnewfile,string& error) ;
+    int renderMapItem(QgsLayoutItem* oneItem,string absfilename, int dpi,
+                      QgsLayout* pLayout ) ;
 
     QgsLayoutItem* findLayoutItemByUuid(QgsLayout* layout,string uuid) ;
 
     /// outjsonfile is full absfilepath
     /// outfileroot is relfilepath will be add {outfileroot}{-{index}}.png
-    int exportProjectJsonFile(QString outjsonfile,QString outfileroot, string& error) ;
+    int exportProjectJsonFile( QgsPrintLayout* layout, QString reloutfilenameroot,int dpi,string& outjsondata, string& error) ;
 
 
     ///
@@ -136,7 +143,9 @@ private:
     /// \param error
     /// \return
     ///
-    int layoutAddRectEllArrow(string shapetype,QString& jsondata,string& error) ;
+    int layoutAddRectEllArrow(string shapetype,QString& jsondata,string& outJsonData,string& error) ;
+
+
 
     QJsonObject extractMapItemGridData( QgsLayoutItemMap* mapItem) ;
     QJsonObject qcolor2JsonObject(const QColor& qcolor) ;
