@@ -23,6 +23,8 @@ WMapComposer::WMapComposer(QString pedir,QString resdir)
     }
 }
 
+
+
 /// one method one line...
 string WMapComposer::getMethodAPIs()
 {
@@ -37,10 +39,12 @@ string WMapComposer::getMethodAPIs()
     out += "layout.addrect:file,\n" ;
     out += "layout.addell:file,\n" ;
     out += "layout.addarrow:file,\n" ;
-    out += "project.addwms:file,\n" ;
+    out += "project.addwms: file,capurl,tms,layers,styleid,datetime,sdui,roiid\n" ;
     out += "project.addvec:file,vecname,vecfile\n" ;
     out += "project.new:\n" ;
     out += "project.export:file,dpi\n" ;
+    out += "item.move:file,left,top,uuid\n" ;
+    out += "item.resize:file,uuid,width,height\n" ;
     out += "--- methods end   ---\n" ;
     return out ;
 }
@@ -100,6 +104,12 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     else if(method=="project.export")
     {
         return this->projectExport(jsondata, outJsonData,error) ;
+    }
+    else if( method=="item.move"){
+        return this->itemMove(jsondata, outJsonData,error) ;
+    }
+    else if( method=="item.resize"){
+        return this->itemResize( jsondata, outJsonData , error) ;
     }
     error = "not supported method:'"+method+"'." ;
     cout<<"not supported method:"<<method<<endl ;
@@ -197,6 +207,7 @@ int WMapComposer::projectNew(QString& jsondata, string& outJsonData,string& erro
 }
 
 
+// jsondata: file,capurl,tms,layers,styleid,datetime,sdui,roiid
 int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string& error)
 {
     // JSON //////////////////////////////////////
@@ -215,21 +226,77 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
     int code1 = checkAndResetProjectFile(relfilepath , error ) ;
     if( code1 != 0 ) return code1 ;
 
+
+    QString wmsCapurl = jdoc.object().value("capurl").toString() ;
+    QString wmsTms = jdoc.object().value("tms").toString() ;//tileMatrixSet
+    QString wmsLayers = jdoc.object().value("layers").toString() ;
+    int wmsStyleid = 0 ;
+    if( jdoc.object().value("styleid").type() == QJsonValue::Type::Double ) wmsStyleid = jdoc.object().value("styleid").toInt() ;
+    else  wmsStyleid = jdoc.object().value("styleid").toString().toInt() ;
+
+    int64_t wmsDatetime = 0;
+    if(jdoc.object().value("datetime").type() ==QJsonValue::Type::Double ) wmsDatetime = jdoc.object().value("datetime").toDouble() ;
+    else wmsDatetime = jdoc.object().value("datetime").toString().toDouble() ;
+
+    QString wmsSdui = jdoc.object().value("sdui").toString() ;
+    QString wmsRoiid = jdoc.object().value("roiid").toString() ;
+
+    if( wmsCapurl.length() == 0 ){
+        error = "empty wms capability url." ;
+        return 3 ;
+    }
+
+    if( wmsTms.length() == 0 ){
+        error = "empty tileMatrixSet." ;
+        return 3 ;
+    }
+
+    if( wmsLayers.length() == 0 ){
+        error = "empty layers." ;
+        return 3 ;
+    }
+
+
+    if(wmsSdui.length()==0 || wmsSdui.compare("null") == 0 || wmsSdui.compare("{}") == 0 ){
+        wmsSdui = "null" ;
+    }
+
+    if(wmsRoiid.length()==0 || wmsRoiid.compare("null") == 0 ){
+        wmsRoiid = "null" ;
+    }
+
+
+    // JSON END ///////////////////////////////////////////////////////////////
+
+
     QgsDataSourceUri uri1;
-    uri1.setParam("url", "http://localhost/qgisserver?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities&map=/home/hadoop/qgisserver_projects/world.qgs");
 
-    //    ///////////////////////////////////////
+    {//a working wms layer exampole
+//        uri1.setParam("url", "http://localhost/qgisserver?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities&map=/home/hadoop/qgisserver_projects/world.qgs");
+//        //    ///////////////////////////////////////
+//        //uri1.setParam( QStringLiteral( "tileMatrixSet" ), "ms_7");
+//        uri1.setParam( QStringLiteral( "layers" ), "world-truecolor" );
+//        uri1.setParam( QStringLiteral( "styles" ), "default" );
+//        uri1.setParam( QStringLiteral( "format" ), "image/png" );
+//        uri1.setParam( QStringLiteral( "crs" ), "EPSG:4326" );
+//        //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20190601000000" );
+    }
 
+    {//pixelengine wms
+        uri1.setParam("url", wmsCapurl);
+        uri1.setParam( QStringLiteral( "tileMatrixSet" ), wmsTms );
+        uri1.setParam( QStringLiteral( "layers" ),        wmsLayers );
+        uri1.setParam( QStringLiteral( "styles" ), "default" );
+        uri1.setParam( QStringLiteral( "format" ), "image/png" );
+        QString dimsStr = QString("datetime=")+QString::number(wmsDatetime)
+                + ";styleid="+QString::number(wmsStyleid)+";sdui="+wmsSdui+";roiid="+wmsRoiid ;
+        //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20200600000000;styleid=2;sdui=null" );
+        uri1.setParam( QStringLiteral( "tileDimensions" ), dimsStr );
+    }
 
-    //uri1.setParam( QStringLiteral( "tileMatrixSet" ), "ms_7");
-    uri1.setParam( QStringLiteral( "layers" ), "world-truecolor" );
-    uri1.setParam( QStringLiteral( "styles" ), "default" );
-    uri1.setParam( QStringLiteral( "format" ), "image/png" );
-    uri1.setParam( QStringLiteral( "crs" ), "EPSG:4326" );
-    //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20190601000000" );
-    qDebug()<<uri1.encodedUri();
+    //qDebug()<<uri1.encodedUri();
 
-    QgsRasterLayer* rlayer = new QgsRasterLayer( uri1.encodedUri() ,"wmslayer","wms") ;
+    QgsRasterLayer* rlayer = new QgsRasterLayer( uri1.encodedUri() ,"wmslyr","wms") ;
     if( rlayer->isValid() )
     {
         qDebug()<<"rlayer good";
@@ -254,7 +321,7 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
     return 0 ;
 }
 
-
+//jsondata: file
 int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& error)
 {
     // json and project ////////////////////////////
@@ -278,6 +345,7 @@ int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& e
     double width =100;// jroot["width"].as<double>() ;
     double height =100;// jroot["height"].as<double>() ;
     cout<<"l,t,w,h:"<<left<<","<<top<<","<<width<<","<<height<<endl ;
+
 
     // //////////////////////////////////////////////
 
@@ -334,13 +402,6 @@ int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& e
 int WMapComposer::renderMapItem(QgsLayoutItem* oneItem,string absfilename, int dpi,
                                 QgsLayout* pLayout )
 {
-//    //hide all but this item, and then reset visible
-//    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
-//    {
-//        (*it)->setVisibility(false);
-//    }
-
-
     oneItem->setVisibility(true);
     pLayout->refresh();
     QgsLayoutExporter exporter(pLayout);
@@ -349,11 +410,7 @@ int WMapComposer::renderMapItem(QgsLayoutItem* oneItem,string absfilename, int d
                                            QSize(),
                                            dpi ) ;
     outImage.save( absfilename.c_str()) ;
-
-//    for( QList<QgsLayoutItem*>::iterator  it = itemList.begin() ; it != itemList.end() ; ++ it )
-//    {
-//        (*it)->setVisibility(true);
-//    }
+    oneItem->setVisibility(false);
 
     return 0 ;
 }
@@ -702,6 +759,153 @@ int WMapComposer::layoutAddArrow(QString& jsondata , string& outJsonData ,string
 }
 
 
+
+/// file,left,top,uuid
+int WMapComposer::itemMove(QString&jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    double left = jroot["left"].toDouble() ;
+    double top =  jroot["top"].toDouble() ;
+    string uuid = jroot["uuid"].toString().toStdString();
+
+    cout<<"left,top,uuid:"<<left<<","<<top<<","<<uuid<<endl ;
+
+    // //////////////////////////////////////////////
+
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItem* theItem = this->findLayoutItemByUuid(layout , uuid) ;
+    if( theItem==nullptr ){
+        error = string("no layout item uuid:'") + uuid+ "'." ;
+        return 13 ;
+    }
+    theItem->attemptMove( QgsLayoutPoint(left,top) );
+
+
+
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+uuid+"\"}" ;
+
+    return 0 ;
+}
+
+int WMapComposer::itemResize(QString&jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    double width = jroot["width"].toDouble() ;
+    double height =  jroot["height"].toDouble() ;
+    string uuid = jroot["uuid"].toString().toStdString();
+
+    cout<<"width,height,uuid:"<<width<<","<<height<<","<<uuid<<endl ;
+
+    // //////////////////////////////////////////////
+
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItem* theItem = this->findLayoutItemByUuid(layout , uuid) ;
+    if( theItem==nullptr ){
+        error = string("no layout item uuid:'") + uuid+ "'." ;
+        return 13 ;
+    }
+    theItem->attemptResize( QgsLayoutSize(width,height) );
+
+
+
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+uuid+"\"}" ;
+
+    return 0 ;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 int WMapComposer::layoutAddRect(QString& jsondata , string& outJsonData ,string& error)
 {
     return this->layoutAddRectEllArrow("rect" , jsondata,outJsonData, error) ;
@@ -737,8 +941,10 @@ int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata , str
 
     double left = 0;//jroot["left"].as<double>() ;
     double top =  0;//jroot["top"].as<double>() ;
-    double width = 50;//jroot["width"].as<double>() ;
+    double width = 80;//jroot["width"].as<double>() ;
     double height = 0;//jroot["height"].as<double>() ;
+    if( shapetype=="rect") height = 40 ;
+    if( shapetype=="ell")  height = 40 ;
     cout<<"l,t,w,h:"<<left<<","<<top<<","<<width<<","<<height<<endl ;
 
     qDebug()<<"shapetype:"<<shapetype.c_str() ;

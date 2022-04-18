@@ -101,9 +101,12 @@ void runHttp()
 
     omcHttpServer.Post("/", [&](const Request& req,Response& res){
         cout<<"--- new request ---"<<endl ;
+        res.set_header("Access-Control-Allow-Origin", "*");
 
         string method = req.get_file_value("method").content ;
         string jsondata = req.get_file_value("data").content ;
+        cout<<"method:"<<method<<endl ;
+        cout<<"data:"<<jsondata<<endl ;
         if( method=="" || jsondata=="" || jsondata[0]!='{' || jsondata.back()!='}' ){
             cout<<"no method or data or bad data as json."<<endl ;
             res.set_content("{\"state\":1,\"message\":\"no method or data or bad data as json.\",\"data\":{}}" , "application/json");
@@ -144,7 +147,8 @@ int main(int argc, char *argv[])
     cout<<"This program will create oms_out dir under pedir for output jsons and pngs."<<endl ;
     cout<<"v0.0.0 created."<<endl ;
     cout<<"v0.0.1 "<<endl ;
-    cout<<"v0.0.2 2022-4-16"<<endl ;
+    cout<<"v0.0.3 2022-4-16"<<endl ;
+    cout<<"v0.0.4 2022-4-17"<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;

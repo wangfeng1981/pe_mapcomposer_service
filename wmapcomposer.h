@@ -106,8 +106,10 @@ public:
     int projectAddVec(QString& jsondata,string& outJsonData,string& error) ;
     /// file,dpi
     int projectExport(QString& jsondata,string& outJsonData,string& error) ;
-
-
+    ///
+    int itemMove(QString&jsondata,string&outJsonData,string&error) ;
+    ///
+    int itemResize(QString&jsondata,string&outJsonData,string&error) ;
 
 
 
