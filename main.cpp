@@ -149,6 +149,8 @@ int main(int argc, char *argv[])
     cout<<"v0.0.1 "<<endl ;
     cout<<"v0.0.3 2022-4-16"<<endl ;
     cout<<"v0.0.4 2022-4-17"<<endl ;
+    cout<<"v0.0.6 addmap x0,x1,y0,y1 2022-4-19"<<endl ;
+    cout<<"v0.0.7 2022-4-21"<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
@@ -161,6 +163,7 @@ int main(int argc, char *argv[])
     QgsApplication::initQgis();
     qDebug()<<"providerlist:"<<QgsProviderRegistry::instance()->providerList() ;
     cout<<"init qgis done."<<endl ;
+
 
     if( argc!=2 ){
         cout<<"argc not 2"<<endl ;
@@ -182,6 +185,16 @@ int main(int argc, char *argv[])
 
 
     WMapComposer mapComposer(peDir , resDir ) ;
+
+    cout<<"///////// Method APIs Start /////////////"<<endl ;
+    cout<<"//"<<endl ;
+    cout<<"//"<<endl ;
+    cout<<"//"<<endl ;
+    cout<< mapComposer.getMethodAPIs() <<endl ;
+    cout<<"//"<<endl ;
+    cout<<"//"<<endl ;
+    cout<<"//"<<endl ;
+    cout<<"///////// Method APIs End   /////////////"<<endl ;
 
 
     void *mainContext = zmq_ctx_new ();

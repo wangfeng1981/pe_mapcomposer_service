@@ -33,18 +33,23 @@ string WMapComposer::getMethodAPIs()
     out += "layout.addimage:file,relsrc\n" ;
     out += "layout.addlabel:file,text\n" ;
     out += "layout.addlegend:file,\n" ;
-    out += "layout.addmap:file,\n" ;
+    out += "layout.addmap:file,x0,x1,y0,y1,\n" ;
     out += "layout.addnorth:file,\n" ;
     out += "layout.addscalebar:file,\n" ;
     out += "layout.addrect:file,\n" ;
     out += "layout.addell:file,\n" ;
     out += "layout.addarrow:file,\n" ;
+    out += "layout.deleteitem: file,uuid, \n" ;
     out += "project.addwms: file,capurl,tms,layers,styleid,datetime,sdui,roiid\n" ;
     out += "project.addvec:file,vecname,vecfile\n" ;
     out += "project.new:\n" ;
     out += "project.export:file,dpi\n" ;
+    out += "project.deletelayer:file,lyrid\n" ;
     out += "item.move:file,left,top,uuid\n" ;
     out += "item.resize:file,uuid,width,height\n" ;
+    out += "map.setextent: file,mapuuid,xmin,xmax,ymin,ymax\n" ;
+    out += "item.setproperty : file,uuid,loitype,...a lot...\n" ;
+    out += "layer.setproperty : file,qlyrid,type2,...a lot...\n" ;
     out += "--- methods end   ---\n" ;
     return out ;
 }
@@ -111,6 +116,18 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     else if( method=="item.resize"){
         return this->itemResize( jsondata, outJsonData , error) ;
     }
+    else if( method=="map.setextent"){
+        return this->mapSetExtent(jsondata,outJsonData,error) ;
+    }else if( method=="layout.deleteitem"){
+        return this->layoutDeleteItem(jsondata,outJsonData,error) ;
+    }
+    else if( method=="project.deletelayer"){
+        return this->projectDeleteLayer(jsondata,outJsonData,error) ;
+    }else if( method=="item.setproperty"){
+        return this->itemSetProperty(jsondata,outJsonData,error) ;
+    }else if( method=="layer.setproperty"){
+        return this->layerSetProperty(jsondata,outJsonData,error) ;
+    }
     error = "not supported method:'"+method+"'." ;
     cout<<"not supported method:"<<method<<endl ;
     return 9 ;
@@ -157,6 +174,7 @@ int WMapComposer::projectNew(QString& jsondata, string& outJsonData,string& erro
     }
 
     this->m_project->clear();
+    this->m_project->setCrs( QgsCoordinateReferenceSystem("EPSG:4326"));
 
     //create daily subdir
     QString ymdStr = QDate::currentDate().toString("yyyyMMdd") ;
@@ -288,6 +306,7 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
         uri1.setParam( QStringLiteral( "layers" ),        wmsLayers );
         uri1.setParam( QStringLiteral( "styles" ), "default" );
         uri1.setParam( QStringLiteral( "format" ), "image/png" );
+        uri1.setParam( QStringLiteral( "crs" ), "EPSG:4326" );
         QString dimsStr = QString("datetime=")+QString::number(wmsDatetime)
                 + ";styleid="+QString::number(wmsStyleid)+";sdui="+wmsSdui+";roiid="+wmsRoiid ;
         //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20200600000000;styleid=2;sdui=null" );
@@ -321,7 +340,7 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
     return 0 ;
 }
 
-//jsondata: file
+//jsondata: file,x0,x1,y0,y1
 int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& error)
 {
     // json and project ////////////////////////////
@@ -346,6 +365,25 @@ int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& e
     double height =100;// jroot["height"].as<double>() ;
     cout<<"l,t,w,h:"<<left<<","<<top<<","<<width<<","<<height<<endl ;
 
+    double x0 = getJsonObjDoubleValue( jdoc.object() , "x0") ;
+    double x1 = getJsonObjDoubleValue( jdoc.object() , "x1") ;
+    double y0 = getJsonObjDoubleValue( jdoc.object() , "y0") ;
+    double y1 = getJsonObjDoubleValue( jdoc.object() , "y1") ;
+
+    if(x0<-180) x0 = -180 ;
+    if( x1>180) x1 = 180 ;
+    if( y0< -90 ) y0 = -90 ;
+    if( y1> 90) y1 = 90 ;
+
+    if( x0==x1 ){
+        x0 = -180 ;
+        x1 = 180 ;
+    }
+    if( y0 == y1 ){
+        y0 = -90 ;
+        y1 = 90 ;
+    }
+
 
     // //////////////////////////////////////////////
 
@@ -356,10 +394,11 @@ int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& e
     }
 
     QgsLayoutItemMap* mapItem = QgsLayoutItemMap::create( layout ) ;
+    mapItem->setCrs( QgsCoordinateReferenceSystem("EPSG:4326"));
     mapItem->setPos(left,top);
     mapItem->attemptResize( QgsLayoutSize(width,height));
-    mapItem->setExtent( QgsRectangle(-180,-90,180,90) );
-    double scale = 360.0*111*1000*1000 / width ;
+    mapItem->setExtent( QgsRectangle(x0,y0,x1,y1) );
+    double scale = (x1-x0)*111*1000*1000 / width ;
     mapItem->setScale( scale );
     layout->addLayoutItem(mapItem) ;
 
@@ -516,13 +555,23 @@ int WMapComposer::layoutAddScaleBar(QString& jsondata  , string& outJsonData ,st
 
     QgsLayoutItemScaleBar* scalebar = QgsLayoutItemScaleBar::create(layout) ;
     scalebar->setLinkedMap( mapItem1);
+    scalebar->setSegmentSizeMode( QgsScaleBarSettings::SegmentSizeMode::SegmentSizeFitWidth );
+    scalebar->setMinimumBarWidth(50);
+    scalebar->setMaximumBarWidth(100);
+    scalebar->setNumberOfSegments(2);
+    scalebar->setNumberOfSegmentsLeft(0);
+    scalebar->setUnitLabel("km");
+    scalebar->setUnits( QgsUnitTypes::DistanceUnit::DistanceKilometers );
     scalebar->setPos(left,top);
+    scalebar->update();
     scalebar->attemptResize( QgsLayoutSize(width,height));
+    scalebar->update();
     layout->addLayoutItem(scalebar);
+    scalebar->update();
+    scalebar->setLinkedMap( mapItem1);
 
 
-
-    // SAVE //////////////////////////////////
+    // SAVE //////////////
     bool wok = this->m_project->write() ;
     if( wok==false ){
         error = "failed to write file." ;
@@ -857,7 +906,24 @@ int WMapComposer::itemResize(QString&jsondata,string&outJsonData,string&error)
         error = string("no layout item uuid:'") + uuid+ "'." ;
         return 13 ;
     }
-    theItem->attemptResize( QgsLayoutSize(width,height) );
+
+    if( theItem->type() == QgsLayoutItemRegistry::ItemType::LayoutMap )
+    {
+        QgsLayoutItemMap* map = dynamic_cast<QgsLayoutItemMap*> ( theItem ) ;
+        double oldscale = map->scale() ;
+        double oldwidth = map->sizeWithUnits().width() ;
+        double newscale = oldwidth / width * oldscale ;
+        QgsRectangle rect1 = map->extent() ;
+
+
+        map->setScale(newscale);
+        map->setExtent(rect1);
+        theItem->attemptResize( QgsLayoutSize(width,height) );
+    }else{
+        theItem->attemptResize( QgsLayoutSize(width,height) );
+    }
+
+
 
 
 
@@ -874,6 +940,82 @@ int WMapComposer::itemResize(QString&jsondata,string&outJsonData,string&error)
 
     return 0 ;
 }
+
+/// map.extent: file,mapuuid,xmin,xmax,ymin,ymax
+int WMapComposer::mapSetExtent(QString& jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString mapuuid = jroot["mapuuid"].toString() ;
+    double xmin = getJsonObjDoubleValue(jroot , "xmin") ;
+    double xmax = getJsonObjDoubleValue(jroot , "xmax") ;
+    double ymin = getJsonObjDoubleValue(jroot , "ymin") ;
+    double ymax = getJsonObjDoubleValue(jroot , "ymax") ;
+
+    // //////////////////////////////////////////////
+
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItem* theItem = this->findLayoutItemByUuid(layout , mapuuid.toStdString() ) ;
+    if( theItem==nullptr ){
+        error = string("no layout item uuid:'") + mapuuid.toStdString()+ "'." ;
+        return 13 ;
+    }
+
+    if( theItem->type() == QgsLayoutItemRegistry::ItemType::LayoutMap )
+    {
+        QgsLayoutItemMap* map = dynamic_cast<QgsLayoutItemMap*> ( theItem ) ;
+        QgsRectangle rect1 = map->extent() ;
+        rect1.setXMinimum(xmin);
+        rect1.setXMaximum(xmax);
+        rect1.setYMinimum(ymin);
+        rect1.setYMaximum(ymax);
+        map->setExtent(rect1);
+        map->refresh();
+    }else{
+        error = string("it is not layout map item for uuid:'") + mapuuid.toStdString()+ "'." ;
+        return 14 ;
+    }
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+mapuuid.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+
+
+
+
+
 
 
 
@@ -1088,6 +1230,97 @@ int WMapComposer::projectAddVec(QString& jsondata , string& outJsonData , string
 
 
 
+/// layout.deleteitem : file,uuid
+int WMapComposer::layoutDeleteItem(QString& jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString uuid = jroot["uuid"].toString() ;
+
+    // //////////////////////////////////////////////
+
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItem* item = this->findLayoutItemByUuid(layout , uuid.toStdString()) ;
+
+    if( item!=nullptr ){
+        layout->removeLayoutItem(item) ;
+    }
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+uuid.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+/// project.deletelayer: file,lyrid
+int WMapComposer::projectDeleteLayer(QString& jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString lyrid = jroot["lyrid"].toString() ;
+
+    // //////////////////////////////////////////////
+
+    m_project->removeMapLayer(lyrid);
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"lyrid\":\""+lyrid.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+
 
 
 //
@@ -1098,21 +1331,61 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         return 0 ;
     }
 
+    QList<QgsMapLayer*> layerList = m_project->layerTreeRoot()->layerOrder() ;
+
     QJsonArray layerArr ;
-    QMap<QString, QgsMapLayer *> layersMap = m_project->mapLayers();
-    for(auto it=layersMap.begin() ; it != layersMap.end(); ++ it )
+
+    //QMap<QString, QgsMapLayer *> layersMap = m_project->mapLayers();
+    for(auto it=layerList.begin() ; it != layerList.end(); ++ it )
     {
-        QString qlyrid = it.key() ;
-        QgsMapLayer* qlayer = it.value() ;
+        QgsMapLayer* qlayer = *it;
 
         QJsonObject lyrObj ;
-        lyrObj.insert( "qlyrid" , QJsonValue(qlyrid) ) ;
+        lyrObj.insert( "qlyrid" , qlayer->id() ) ;
+        lyrObj.insert("name",qlayer->name() );
 
         bool lyrok = true ;
         if( qlayer->type()== QgsMapLayerType::RasterLayer ){
             lyrObj.insert( "type" , "wms") ;
         }else if( qlayer->type()== QgsMapLayerType::VectorLayer )
         {
+            QgsVectorLayer* veclayer = dynamic_cast<QgsVectorLayer*>( qlayer ) ;
+            if( veclayer->geometryType() == QgsWkbTypes::GeometryType::PointGeometry )
+            {
+                lyrObj.insert( "type2" , 1) ;
+                QJsonObject dataobj2 ;
+                string error2 ;
+                int ok2 = extractVecLayerPointSymbol(veclayer,dataobj2,error2) ;
+                if( ok2==0 ){
+                    lyrObj.insert("data" , dataobj2) ;
+                }else{
+                    lyrObj.insert("error2" , QString::fromStdString(error2) ) ;
+                }
+            }else if( veclayer->geometryType() == QgsWkbTypes::GeometryType::LineGeometry )
+            {
+                lyrObj.insert( "type2" , 2) ;
+                QJsonObject dataobj2 ;
+                string error2 ;
+                int ok2 = extractVecLayerLineSymbol(veclayer,dataobj2,error2) ;
+                if( ok2==0 ){
+                    lyrObj.insert("data" , dataobj2) ;
+                }else{
+                    lyrObj.insert("error2" , QString::fromStdString(error2)) ;
+                }
+            }else if( veclayer->geometryType() == QgsWkbTypes::GeometryType::PolygonGeometry )
+            {
+                lyrObj.insert( "type2" , 3) ;
+                QJsonObject dataobj2 ;
+                string error2 ;
+                int ok2 = extractVecLayerPolySymbol(veclayer,dataobj2,error2) ;
+                if( ok2==0 ){
+                    lyrObj.insert("data" , dataobj2) ;
+                }else{
+                    lyrObj.insert("error2" , QString::fromStdString(error2)) ;
+                }
+            }else{
+                lyrok=false ;
+            }
             lyrObj.insert( "type" , "vec") ;
         }else{
             qDebug()<<"Warning : unsupported layer type:"<< (int) qlayer->type() << " , skip it."  ;
@@ -1200,11 +1473,10 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
             dataJsonObj.insert("text" , label->text() ) ;
             {
                 QJsonObject fontJsonObj ;
-
                 if( label->font().bold() ) fontJsonObj.insert("bold",1) ;
                 else fontJsonObj.insert("bold",0) ;
                 fontJsonObj.insert("color" , qcolor2JsonObject(label->fontColor())) ;
-                fontJsonObj.insert("size" , label->font().pixelSize() );
+                fontJsonObj.insert("size" , label->font().pointSize() );
                 fontJsonObj.insert("align", alignFlag2String(label->hAlign()) ) ;
 
                 dataJsonObj.insert("font" , fontJsonObj) ;
@@ -1372,6 +1644,155 @@ int WMapComposer::projectExport(QString& jsondata , string& outJsonData ,string&
 
 
 
+/// item.setproperty : file,uuid,loitype,...a lot...
+int WMapComposer::itemSetProperty(QString& jsondata,string&outJsonData,string&error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString uuid = jroot["uuid"].toString() ;
+    QString loitype = jroot["loitype"].toString() ;
+
+    // //////////////////////////////////////////////
+
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+    QgsLayoutItem * item = findLayoutItemByUuid(layout , uuid.toStdString() ) ;
+    if( item==nullptr ){
+        error = string("not find item for:") + uuid.toStdString() ;
+        return 13 ;
+    }
+
+    QJsonObject jobjLayoutitem = jroot["layoutitem"].toObject() ;
+    QJsonObject jobjFrame = jobjLayoutitem["frame"].toObject() ;
+    int ret1 = setLayoutItemFrameByJsonObject(item , jobjFrame , error) ;
+    if( ret1!=0 ) return ret1 ;
+
+    if( loitype.compare("map") ==0 ){
+        int ret2 = setLayoutItemMapGrid( item , jroot["grid"].toObject() , error ) ;
+        if( ret2!=0 ) return ret2 ;
+    }else if( loitype.compare("rect") == 0
+              || loitype.compare("ell") == 0 )
+    {
+        int ret2 = setLayoutItemShape(item , jroot["data"].toObject() , error ) ;
+        if( ret2!=0 ) return ret2 ;
+    }else if( loitype.compare("label") == 0 )
+    {
+        int ret2 = setLayoutItemLabel(item,jroot["data"].toObject(),error) ;
+        if( ret2!=0 ) return ret2 ;
+    }
+
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+uuid.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+///layer.setproperty : file,qlyrid,type2,...a lot...
+int WMapComposer::layerSetProperty(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString lyrid = jroot["qlyrid"].toString() ;
+    int type2  = getJsonObjDoubleValue( jroot , "type2") ;
+
+    // //////////////////////////////////////////////
+
+    QgsMapLayer* layer1 = findMapLayerByLyrid(lyrid) ;
+    if( layer1==nullptr ){
+        error = string("not find layer1 for:") + lyrid.toStdString() ;
+        return 13 ;
+    }
+    QgsVectorLayer* layer2 = dynamic_cast<QgsVectorLayer*>(layer1) ;
+    if( layer2==nullptr ){
+        error = "not a QgsVectorLayer" ;
+        return 14 ;
+    }
+
+    QJsonObject dataObj = jroot["data"].toObject() ;
+    if( type2==1 ){
+        int ret2 = setLayerPointSymbol(layer2 , dataObj["pointsymbol"].toObject() , error ) ;
+        if( ret2!=0 ) return ret2 ;
+    }else if( type2==2 ){
+        int ret2 = setLayerLineSymbol(layer2 , dataObj["linesymbol"].toObject() , error ) ;
+        if( ret2!=0 ) return ret2 ;
+    }else if( type2==3 ){
+        int ret2 = setLayerPolySymbol(layer2 , dataObj["polysymbol"].toObject() , error ) ;
+        if( ret2!=0 ) return ret2 ;
+    }else{
+        error = string("not supported type2:") + QString::number(type2).toStdString() ;
+        return 15 ;
+    }
+
+
+
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"qlyrid\":\""+lyrid.toStdString()+"\"}" ;
+
+    return 0 ;
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1411,7 +1832,7 @@ int WMapComposer::projectExport(QString& jsondata , string& outJsonData ,string&
 //    width,
 //    height,
 //    rot,      //rotation
-//    z,
+//    z,///layer.setproperty : file,qlyrid,type2,...a lot...
 //    loitype,
 //    qloitype,
 //    frame:{
@@ -1596,9 +2017,9 @@ QJsonObject WMapComposer::extractMapItemGridData( QgsLayoutItemMap* mapItem)
     }else{
         cout<<"debug grid enabled."<<endl ;
         QgsLayoutItemMapGrid* mapGrid = mapItem->grid() ;
-        grid.insert("enabled" ,1) ;
+        grid.insert("enabled" , mapGrid->enabled()?1:0 ) ;
         grid.insert("stepx" ,mapGrid->intervalX() ) ;
-        grid.insert("sttepy" , mapGrid->intervalY()) ;
+        grid.insert("stepy" , mapGrid->intervalY()) ;
         grid.insert("offsetx" , mapGrid->offsetX() ) ;
         grid.insert("offsety" , mapGrid->offsetY() ) ;
         QgsSimpleLineSymbolLayer* linesymbol = dynamic_cast<QgsSimpleLineSymbolLayer*> (mapGrid->lineSymbol()->symbolLayer(0)) ;
@@ -1659,3 +2080,486 @@ QString WMapComposer::alignFlag2String( Qt::AlignmentFlag aflag)
     }
     return "left" ;
 }
+
+double WMapComposer::getJsonObjDoubleValue(const QJsonObject& obj,QString key)
+{
+    if( obj.value(key).isString() ){
+        return obj.value(key).toString().toDouble() ;
+    }else if( obj.value(key).isDouble() ){
+        return obj.value(key).toDouble() ;
+    }else{
+        return 0 ;
+    }
+}
+
+
+int WMapComposer::setLayoutItemFrameByJsonObject(QgsLayoutItem* item,const QJsonObject& jobj, string& error)
+{
+    int enabled = jobj.value("enabled").toInt() ;
+
+    if( enabled== 0 ){
+        item->setFrameEnabled(false);
+    }else{
+        item->setFrameEnabled(true);
+        double width = jobj.value("width").toDouble() ;
+        QJsonObject clr = jobj.value("color").toObject() ;
+        int r = clr.value("r").toInt() ;
+        int g = clr.value("g").toInt() ;
+        int b = clr.value("b").toInt() ;
+        int a = clr.value("a").toInt() ;
+
+        item->setFrameStrokeColor( QColor(r,g,b,a));
+        auto twid  = item->frameStrokeWidth();
+        twid.setLength(width);
+        item->setFrameStrokeWidth(twid);
+    }
+    return 0 ;
+}
+
+int WMapComposer::setLayoutItemMapGrid(QgsLayoutItem* item,const QJsonObject& jobj, string& error)
+{
+    QgsLayoutItemMap* item1 = dynamic_cast<QgsLayoutItemMap*>(item) ;
+    if( item1==nullptr ) {
+        error = "invalid QgsLayoutItemMap" ;
+        return 20 ;
+    }
+
+    int enabled = jobj["enabled"].toInt();
+    if( enabled==0 ){
+        item1->grid()->setEnabled(false);
+    }else{
+        item1->grid()->setEnabled(true);
+        item1->grid()->setCrs(QgsCoordinateReferenceSystem("EPSG:4326"));
+        double stepx = getJsonObjDoubleValue(jobj,"stepx") ;
+        double stepy = getJsonObjDoubleValue(jobj,"stepy") ;
+        double offsetx = getJsonObjDoubleValue(jobj,"offsetx") ;
+        double offsety = getJsonObjDoubleValue(jobj,"offsety") ;
+
+        item1->grid()->setIntervalX(stepx);
+        item1->grid()->setIntervalY(stepy) ;
+        item1->grid()->setOffsetX(offsetx);
+        item1->grid()->setOffsetY(offsety);
+
+        QJsonObject line = jobj["linesymbol"].toObject() ;
+        QJsonObject font = jobj["font"].toObject() ;
+
+        double linewid = getJsonObjDoubleValue(line,"width") ;
+        QColor lineclr = jsonObject2QColor(line["color"].toObject() ) ;
+        QString linestyle=line["style"].toString() ;
+
+        int bold = getJsonObjDoubleValue(font,"bold") ;
+        QColor fontclr = jsonObject2QColor(font["color"].toObject()) ;
+        double fontsize = getJsonObjDoubleValue(font,"size");
+        QString align = font["align"].toString() ;
+
+        QgsSimpleLineSymbolLayer* linesymbol =
+                dynamic_cast<QgsSimpleLineSymbolLayer*>
+                (item1->grid()->lineSymbol()->symbolLayer(0)) ;
+        if( linesymbol==nullptr ){
+            error = "bad linesymbol for Grid." ;
+            return 21 ;
+        }
+        linesymbol->setColor(lineclr);
+        linesymbol->setWidth(linewid);
+        linesymbol->setPenStyle( Qt::PenStyle::SolidLine );
+        if( linestyle=="dot"){
+            linesymbol->setPenStyle( Qt::PenStyle::DotLine );
+        }else if( linestyle=="dash"){
+            linesymbol->setPenStyle( Qt::PenStyle::DashLine );
+        }
+
+        item1->grid()->setAnnotationEnabled(true);
+        item1->grid()->setAnnotationFontColor(fontclr);
+        item1->grid()->setAnnotationPrecision(0);
+        QFont tfont = item1->grid()->annotationFont() ;
+        if( bold==0 ) tfont.setBold(false);
+        else tfont.setBold(true);
+        tfont.setPixelSize(fontsize);
+        item1->grid()->setAnnotationFont( tfont);
+    }
+    return 0 ;
+}
+
+QColor WMapComposer::jsonObject2QColor(const QJsonObject& clrObj)
+{
+    int r = clrObj.value("r").toInt() ;
+    int g = clrObj.value("g").toInt() ;
+    int b = clrObj.value("b").toInt() ;
+    int a = clrObj.value("a").toInt() ;
+
+    return QColor(r,g,b,a);
+}
+
+int WMapComposer::setLayoutItemLabel(QgsLayoutItem* item,const QJsonObject& jobj,string& error)
+{
+    QgsLayoutItemLabel* label = dynamic_cast<QgsLayoutItemLabel*>(item) ;
+    if( label==nullptr ) {
+        error = "invalid QgsLayoutItemLabel" ;
+        return 20 ;
+    }
+
+    QString text = jobj["text"].toString() ;
+    label->setText(text);
+
+    QJsonObject font = jobj["font"].toObject() ;
+    QString align = font["align"].toString() ;
+    if( align.compare("left")==0 ){
+        label->setHAlign( Qt::AlignmentFlag::AlignLeft );
+    }else if( align.compare("right") == 0 ){
+        label->setHAlign( Qt::AlignmentFlag::AlignRight );
+    }else {
+        label->setHAlign( Qt::AlignmentFlag::AlignCenter );
+    }
+
+    QFont tQfont = label->font() ;
+    int bold = getJsonObjDoubleValue(font,"bold") ;
+    if( bold==1 ){
+        tQfont.setBold(true);
+    }else{
+        tQfont.setBold(false);
+    }
+
+    QColor clr = jsonObject2QColor( font["color"].toObject() ) ;
+    label->setFontColor(clr);
+
+    double pointsz = getJsonObjDoubleValue(font, "size") ;
+    if( pointsz<=0 ) pointsz = 1 ;
+    tQfont.setPointSizeF(pointsz);
+
+    label->setFont(tQfont);
+    return 0 ;
+}
+
+
+int WMapComposer::setLayoutItemShape(QgsLayoutItem* item ,const QJsonObject& jobj,string& error)
+{
+    QgsLayoutItemShape* shape = dynamic_cast<QgsLayoutItemShape*>(item) ;
+    if( shape==nullptr ) {
+        error = "invalid QgsLayoutItemShape" ;
+        return 20 ;
+    }
+
+    QgsSimpleFillSymbolLayer* symlayer = (QgsSimpleFillSymbolLayer*) shape->symbol()->symbolLayer(0) ;
+    if( symlayer==nullptr ){
+        error = "no fillSymbol" ;
+        return 21 ;
+    }
+
+    QJsonObject polysym = jobj["polysymbol"].toObject() ;
+    QColor fillcolor = jsonObject2QColor( polysym["fillcolor"].toObject() ) ;
+    symlayer->setFillColor(fillcolor);
+
+    QJsonObject linesym = polysym["linesymbol"].toObject() ;
+    QColor linecolor = jsonObject2QColor(linesym["color"].toObject()) ;
+    QString style = linesym["style"].toString() ;
+    double wid = getJsonObjDoubleValue(linesym,"width") ;
+
+    symlayer->setStrokeColor(linecolor);
+    symlayer->setStrokeWidth( wid );
+    if( style.compare("solid") == 0 ){
+        symlayer->setStrokeStyle(Qt::PenStyle::SolidLine);
+    }else if( style.compare("dot")  == 0 ){
+        symlayer->setStrokeStyle(Qt::PenStyle::DotLine);
+    }else{
+       symlayer->setStrokeStyle(Qt::PenStyle::DashLine);
+    }
+
+    return 0 ;
+}
+
+int WMapComposer::extractVecLayerPointSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error)
+{
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleMarkerSymbolLayer* markerSymLayer = dynamic_cast<QgsSimpleMarkerSymbolLayer*>(symlayer) ;
+    if( markerSymLayer==nullptr ){
+        error = "not QgsSimpleMarkerSymbolLayer" ;
+        return 3;
+    }
+
+    double size = markerSymLayer->size() ;
+    QJsonObject pointsymbol ;
+    pointsymbol.insert("size" , size) ;
+
+    QgsSimpleMarkerSymbolLayerBase::Shape mshape = markerSymLayer->shape() ;
+    if( mshape == QgsSimpleMarkerSymbolLayerBase::Shape::Square ){
+        pointsymbol.insert("shape" , "square") ;
+    }else if( mshape == QgsSimpleMarkerSymbolLayerBase::Shape::Diamond ){
+        pointsymbol.insert("shape" , "diamond") ;
+    }else if( mshape == QgsSimpleMarkerSymbolLayerBase::Shape::Pentagon ){
+        pointsymbol.insert("shape" , "pentagon") ;
+    }else if( mshape == QgsSimpleMarkerSymbolLayerBase::Shape::Star ){
+        pointsymbol.insert("shape" , "star") ;
+    }else if( mshape == QgsSimpleMarkerSymbolLayerBase::Shape::Triangle ){
+        pointsymbol.insert("shape" , "triangle") ;
+    }else{ //circle for others
+        pointsymbol.insert("shape" , "circle") ;
+    }
+
+    QJsonObject polysymbol ;
+    polysymbol.insert("fillcolor" , qcolor2JsonObject(markerSymLayer->fillColor())) ;
+
+    QJsonObject linesymbol ;
+    linesymbol.insert("color" , qcolor2JsonObject(markerSymLayer->strokeColor())) ;
+    linesymbol.insert("width" , markerSymLayer->strokeWidth() ) ;
+    if( markerSymLayer->strokeStyle() == Qt::PenStyle::SolidLine ){
+        linesymbol.insert("style","solid") ;
+    }else if( markerSymLayer->strokeStyle()==Qt::PenStyle::DotLine){
+        linesymbol.insert("style","dot") ;
+    }else{
+        linesymbol.insert("style","dash") ;
+    }
+
+    polysymbol.insert("linesymbol" ,linesymbol) ;
+    pointsymbol.insert("polysymbol" , polysymbol) ;
+    retdataobj.insert("pointsymbol" , pointsymbol) ;
+
+    return 0;
+}
+
+
+int WMapComposer::extractVecLayerLineSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error)
+{
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleLineSymbolLayer* linesymlayer = dynamic_cast<QgsSimpleLineSymbolLayer*>(symlayer) ;
+    if( linesymlayer==nullptr ){
+        error = "not QgsSimpleLineSymbolLayer" ;
+        return 3;
+    }
+
+    QJsonObject linesymbol ;
+    linesymbol.insert("color" , qcolor2JsonObject(linesymlayer->color())) ;
+    linesymbol.insert("width" , linesymlayer->width() ) ;
+    if( linesymlayer->penStyle() == Qt::PenStyle::SolidLine ){
+        linesymbol.insert("style","solid") ;
+    }else if( linesymlayer->penStyle()==Qt::PenStyle::DotLine){
+        linesymbol.insert("style","dot") ;
+    }else{
+        linesymbol.insert("style","dash") ;
+    }
+    retdataobj.insert("linesymbol" ,linesymbol) ;
+    return 0;
+}
+
+
+int WMapComposer::extractVecLayerPolySymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error)
+{
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleFillSymbolLayer* fillsymbol = dynamic_cast<QgsSimpleFillSymbolLayer*>(symlayer) ;
+    if( fillsymbol==nullptr ){
+        error = "not QgsSimpleFillSymbolLayer" ;
+        return 3;
+    }
+
+    QJsonObject polysymbol ;
+    polysymbol.insert("fillcolor" , qcolor2JsonObject(fillsymbol->fillColor())) ;
+
+    QJsonObject linesymbol ;
+    linesymbol.insert("color" , qcolor2JsonObject(fillsymbol->strokeColor())) ;
+    linesymbol.insert("width" , fillsymbol->strokeWidth() ) ;
+    if( fillsymbol->strokeStyle() == Qt::PenStyle::SolidLine ){
+        linesymbol.insert("style","solid") ;
+    }else if( fillsymbol->strokeStyle()==Qt::PenStyle::DotLine){
+        linesymbol.insert("style","dot") ;
+    }else{
+        linesymbol.insert("style","dash") ;
+    }
+
+    polysymbol.insert("linesymbol" ,linesymbol) ;
+    retdataobj.insert("polysymbol" , polysymbol) ;
+    return 0;
+}
+
+QgsMapLayer* WMapComposer::findMapLayerByLyrid(QString lyrid)
+{
+    QList<QgsMapLayer*> layerList = m_project->layerTreeRoot()->layerOrder() ;
+    for(auto it=layerList.begin() ; it != layerList.end(); ++ it )
+    {
+        QgsMapLayer* qlayer = *it;
+        if( qlayer->id().compare(lyrid) == 0 ){
+            return qlayer ;
+        }
+    }
+    return nullptr ;
+}
+
+
+int WMapComposer::setLayerPointSymbol(QgsVectorLayer*layer,const QJsonObject& symObj,string& error)
+{
+    QString shape = symObj["shape"].toString() ;
+    double size = getJsonObjDoubleValue(symObj,"size") ;
+
+    QJsonObject polysym = symObj["polysymbol"].toObject() ;
+    QColor fillcolor = jsonObject2QColor(polysym["fillcolor"].toObject()) ;
+    QJsonObject lineobj = polysym["linesymbol"].toObject() ;
+    QColor color1 = jsonObject2QColor(lineobj["color"].toObject()) ;
+    QString style = lineobj["style"].toString() ;
+    double width = getJsonObjDoubleValue(lineobj,"width") ;
+
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleMarkerSymbolLayer* symlayer2 = dynamic_cast<QgsSimpleMarkerSymbolLayer*>(symlayer) ;
+    if( symlayer2==nullptr ){
+        error = "not QgsSimpleMarkerSymbolLayer" ;
+        return 3;
+    }
+
+    symlayer2->setSize(size);
+
+    if( shape.compare("square")==0 ) {
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Square);
+
+    }else if( shape.compare("diamond")==0 ){
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Diamond);
+
+    }else if( shape.compare("pentagon")==0 ){
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Pentagon);
+
+
+    }else if( shape.compare("star")==0 ){
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Star);
+
+
+    }else if( shape.compare("triangle")==0 ){
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Triangle);
+
+
+    }else{ //circle for others
+
+        symlayer2->setShape(QgsSimpleMarkerSymbolLayerBase::Shape::Circle);
+
+    }
+
+    symlayer2->setFillColor(fillcolor);
+    symlayer2->setStrokeColor(color1);
+    symlayer2->setStrokeWidth(width);
+
+    if( style.compare("solid")==0){
+        symlayer2->setStrokeStyle(Qt::PenStyle::SolidLine);
+    }else if( style.compare("dot")==0){
+        symlayer2->setStrokeStyle(Qt::PenStyle::DotLine);
+    }else{
+        symlayer2->setStrokeStyle(Qt::PenStyle::DashLine);
+    }
+    return 0;
+}
+int WMapComposer::setLayerLineSymbol(QgsVectorLayer*layer,const QJsonObject& symObj,string& error)
+{
+    QColor color1 = jsonObject2QColor(symObj["color"].toObject()) ;
+    QString style = symObj["style"].toString() ;
+    double width = getJsonObjDoubleValue(symObj,"width") ;
+
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleLineSymbolLayer* symlayer2 = dynamic_cast<QgsSimpleLineSymbolLayer*>(symlayer) ;
+    if( symlayer2==nullptr ){
+        error = "not QgsSimpleLineSymbolLayer" ;
+        return 3;
+    }
+
+    symlayer2->setColor(color1);
+    symlayer2->setWidth(width);
+    if( style.compare("solid")==0){
+        symlayer2->setPenStyle(Qt::PenStyle::SolidLine);
+    }else if( style.compare("dot")==0){
+        symlayer2->setPenStyle(Qt::PenStyle::DotLine);
+    }else{
+        symlayer2->setPenStyle(Qt::PenStyle::DashLine);
+    }
+    return 0 ;
+}
+int WMapComposer::setLayerPolySymbol(QgsVectorLayer*layer,const QJsonObject& symObj,string& error)
+{
+    QColor fillcolor = jsonObject2QColor(symObj["fillcolor"].toObject()) ;
+    QJsonObject lineobj = symObj["linesymbol"].toObject() ;
+    QColor color1 = jsonObject2QColor(lineobj["color"].toObject()) ;
+    QString style = lineobj["style"].toString() ;
+    double width = getJsonObjDoubleValue(lineobj,"width") ;
+
+    QgsFeatureRenderer* renderer = layer->renderer() ;
+    if( renderer==nullptr ){
+        error = "no renderer" ;
+        return 1 ;
+    }
+    QgsSingleSymbolRenderer* single = dynamic_cast<QgsSingleSymbolRenderer*>(renderer) ;
+    if( single==nullptr ){
+        error = "not QgsSingleSymbolRenderer" ;
+        return 2;
+    }
+
+    QgsSymbolLayer* symlayer = single->symbol()->symbolLayer(0) ;
+    QgsSimpleFillSymbolLayer* fillsymbol = dynamic_cast<QgsSimpleFillSymbolLayer*>(symlayer) ;
+    if( fillsymbol==nullptr ){
+        error = "not QgsSimpleFillSymbolLayer" ;
+        return 3;
+    }
+    fillsymbol->setFillColor(fillcolor);
+    fillsymbol->setStrokeColor(color1);
+    fillsymbol->setStrokeWidth(width);
+    if( style.compare("solid")==0){
+        fillsymbol->setStrokeStyle(Qt::PenStyle::SolidLine);
+    }else if( style.compare("dot")==0){
+        fillsymbol->setStrokeStyle(Qt::PenStyle::DotLine);
+    }else{
+        fillsymbol->setStrokeStyle(Qt::PenStyle::DashLine);
+    }
+    return 0;
+}
+

@@ -38,6 +38,11 @@
 #include "qgslinesymbollayer.h"
 #include "qnamespace.h"
 #include "qgsfillsymbollayer.h"
+#include "qgslayertree.h"
+#include "qgsrenderer.h"
+#include "qgssinglesymbolrenderer.h"
+#include "qgsmarkersymbollayer.h"
+
 
 #include <QTextStream>
 #include <QJsonDocument>
@@ -110,6 +115,18 @@ public:
     int itemMove(QString&jsondata,string&outJsonData,string&error) ;
     ///
     int itemResize(QString&jsondata,string&outJsonData,string&error) ;
+    /// map.extent: file,mapuuid,xmin,xmax,ymin,ymax
+    int mapSetExtent(QString& jsondata,string&outJsonData,string&error) ;
+    /// layout.deleteitem : file,uuid
+    int layoutDeleteItem(QString& jsondata,string&outJsonData,string&error) ;
+    /// project.deletelayer: file,lyrid
+    int projectDeleteLayer(QString& jsondata,string&outJsonData,string&error) ;
+
+    /// item.setproperty : file,uuid,loitype,...a lot...
+    int itemSetProperty(QString& jsondata,string&outJsonData,string&error) ;
+
+    ///layer.setproperty : file,qlyrid,type2,...a lot...
+    int layerSetProperty(QString& jsondata,string& outJsonData,string& error) ;
 
 
 
@@ -129,6 +146,7 @@ private:
                       QgsLayout* pLayout ) ;
 
     QgsLayoutItem* findLayoutItemByUuid(QgsLayout* layout,string uuid) ;
+    QgsMapLayer* findMapLayerByLyrid(QString lyrid) ;
 
     /// outjsonfile is full absfilepath
     /// outfileroot is relfilepath will be add {outfileroot}{-{index}}.png
@@ -151,7 +169,7 @@ private:
 
     QJsonObject extractMapItemGridData( QgsLayoutItemMap* mapItem) ;
     QJsonObject qcolor2JsonObject(const QColor& qcolor) ;
-
+    QColor jsonObject2QColor(const QJsonObject& clrObj) ;
 
     ///
     /// \brief penStyle2String
@@ -161,6 +179,21 @@ private:
     QString penStyle2String( Qt::PenStyle penstyle ) ;
 
     QString alignFlag2String( Qt::AlignmentFlag aflag) ;
+
+    double getJsonObjDoubleValue( const QJsonObject& obj,QString key) ;
+
+    int setLayoutItemFrameByJsonObject(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
+    int setLayoutItemMapGrid(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
+    int setLayoutItemLabel(QgsLayoutItem* item,const QJsonObject& jobj,string& error) ;
+    int setLayoutItemShape(QgsLayoutItem* item ,const QJsonObject& jobj,string& error) ;
+
+    int extractVecLayerPointSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error) ;
+    int extractVecLayerLineSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error) ;
+    int extractVecLayerPolySymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error) ;
+
+    int setLayerPointSymbol(QgsVectorLayer*layer,const QJsonObject& symObj,string& error) ;
+    int setLayerLineSymbol(QgsVectorLayer*layer, const QJsonObject& symObj,string& error) ;
+    int setLayerPolySymbol(QgsVectorLayer*layer, const QJsonObject& symObj,string& error) ;
 
 };
 
