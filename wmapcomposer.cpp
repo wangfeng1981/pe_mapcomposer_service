@@ -50,6 +50,8 @@ string WMapComposer::getMethodAPIs()
     out += "map.setextent: file,mapuuid,xmin,xmax,ymin,ymax\n" ;
     out += "item.setproperty : file,uuid,loitype,...a lot...\n" ;
     out += "layer.setproperty : file,qlyrid,type2,...a lot...\n" ;
+    out += "layout.setpage : file,dir(v|h) \n" ;
+    out += "layout.exportimg : file,dpi,clip (clip means cliptoextent) \n" ;
     out += "--- methods end   ---\n" ;
     return out ;
 }
@@ -127,6 +129,12 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
         return this->itemSetProperty(jsondata,outJsonData,error) ;
     }else if( method=="layer.setproperty"){
         return this->layerSetProperty(jsondata,outJsonData,error) ;
+    }
+    else if( method=="layout.setpage" ){
+        return this->layoutSetPage(jsondata,outJsonData,error) ;
+    }
+    else if( method=="layout.exportimg" ){
+        return this->layoutExportImage(jsondata,outJsonData,error) ;
     }
     error = "not supported method:'"+method+"'." ;
     cout<<"not supported method:"<<method<<endl ;
@@ -1569,8 +1577,16 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         (*it)->setVisibility(true);
     }
 
+
+    QgsLayoutItemPage::Orientation orientation = layout->pageCollection()->page(0)->orientation() ;
+    QJsonObject page ;
+    if( orientation==QgsLayoutItemPage::Orientation::Portrait ) page.insert("dir","v") ;
+    else page.insert("dir","h") ;
+
+
     QJsonObject projJsonObj ;
     projJsonObj.insert("file" , m_project->fileName().replace(m_pedir,"") ) ;
+    projJsonObj.insert("page", page) ;
     projJsonObj.insert("loitem_array" ,layoutitemsArray ) ;
     projJsonObj.insert("layer_array" , layerArr ) ;
 
@@ -1779,11 +1795,133 @@ int WMapComposer::layerSetProperty(QString& jsondata,string& outJsonData,string&
 
     return 0 ;
 
+}
+
+
+///layout.setpage : file,dir(v|h)
+int WMapComposer::layoutSetPage(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString dir = jroot["dir"].toString() ;
+
+    // //////////////////////////////////////////////
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+    if( dir.compare("v")==0 ){
+        layout->pageCollection()->page(0)->setPageSize("A4" ,  QgsLayoutItemPage::Orientation::Portrait ) ;
+    }else{
+        layout->pageCollection()->page(0)->setPageSize("A4" ,  QgsLayoutItemPage::Orientation::Landscape ) ;
+    }
 
 
 
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"dir\":\""+dir.toStdString()+"\"}" ;
+
+    return 0 ;
 
 }
+
+/// layout.exportimg : file,dpi,clip (clip means cliptoextent)
+int WMapComposer::layoutExportImage(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    int dpi = getJsonObjDoubleValue(jroot,"dpi") ;
+    int clipToExtent = getJsonObjDoubleValue(jroot,"clip") ;
+
+    if( dpi<72 ) dpi = 72 ;
+    if( dpi>350 ) dpi = 350 ;
+
+    // //////////////////////////////////////////////
+
+
+    QString outputPngFile = QString::fromStdString(relfilepath) + "_eximg_"
+            + QDate::currentDate().toString("yyyyMMdd")
+            + QTime::currentTime().toString("HHmmss") + "_dpi_"+QString::number(dpi)+ ".png";
+    QString absoutputPngfile = m_pedir + outputPngFile ;
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    layout->refresh();
+    QgsLayoutExporter exporter(layout);
+    bool saveok = false ;
+    if( clipToExtent == 1 ){
+        QRectF mapRegion = layout->pageItemBounds(0,true) ;
+        QImage outImage = exporter.renderRegionToImage( mapRegion,
+                                               QSize(),
+                                               dpi ) ;
+        saveok = outImage.save( absoutputPngfile ) ;
+    }else {
+        QImage outImage = exporter.renderPageToImage(0,QSize() , dpi) ;
+        saveok = outImage.save( absoutputPngfile ) ;
+    }
+
+    if( saveok==false ){
+        error = "save export image file failed." ;
+        return 13 ;
+    }
+
+
+    // SAVE //////////////////////////////////
+//    bool wok = this->m_project->write() ;
+//    if( wok==false ){
+//        error = "failed to write file." ;
+//        return 3 ;
+//    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"img\":\""+outputPngFile.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+
 
 
 
@@ -2562,4 +2700,7 @@ int WMapComposer::setLayerPolySymbol(QgsVectorLayer*layer,const QJsonObject& sym
     }
     return 0;
 }
+
+
+
 

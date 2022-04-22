@@ -128,6 +128,12 @@ public:
     ///layer.setproperty : file,qlyrid,type2,...a lot...
     int layerSetProperty(QString& jsondata,string& outJsonData,string& error) ;
 
+    ///layout.setpage : file,dir(v|h)
+    int layoutSetPage(QString& jsondata,string& outJsonData,string& error) ;
+
+    /// layout.exportimg : file,dpi,clip (clip means cliptoextent)
+    int layoutExportImage(QString& jsondata,string& outJsonData,string& error) ;
+
 
 
     /// one method one line...
