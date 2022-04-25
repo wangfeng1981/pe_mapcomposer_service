@@ -57,6 +57,8 @@
 #include <zmq.h>
 
 #include "../sharedcodes/wstringutils.h"
+#include "helperfunctions.h"
+
 
 
 using namespace std;
@@ -151,6 +153,7 @@ int main(int argc, char *argv[])
     cout<<"v0.0.4 2022-4-17"<<endl ;
     cout<<"v0.0.6 addmap x0,x1,y0,y1 2022-4-19"<<endl ;
     cout<<"v0.0.7 2022-4-21"<<endl ;
+    cout<<"v0.0.9 2022-4-25 add crs list for MapItem"<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
@@ -160,10 +163,16 @@ int main(int argc, char *argv[])
     qputenv("PROJ_LIB",PROJ_DIR.c_str());
     QgsApplication a(argc,argv,true);
     cout<<"init qgis..."<<endl ;
+
     QgsApplication::initQgis();
     qDebug()<<"providerlist:"<<QgsProviderRegistry::instance()->providerList() ;
     cout<<"init qgis done."<<endl ;
 
+    /////////////////////////////////////////////////////
+    /// 读取一次自定义投影信息列表，如果db文件有更新需要重启该程序
+    cout<<"loading all crs..."<<endl ;
+    OmcHelperFunctions::loadAllCrs() ;
+    cout<<"Loaded Crs count:"<<OmcHelperFunctions::s_allCrsAuthidList.length()<<endl ;
 
     if( argc!=2 ){
         cout<<"argc not 2"<<endl ;
@@ -182,6 +191,9 @@ int main(int argc, char *argv[])
 
     g_httpPort = httpPort.toInt() ;
     g_zmqPort = zmqPort.toInt() ;
+
+
+
 
 
     WMapComposer mapComposer(peDir , resDir ) ;

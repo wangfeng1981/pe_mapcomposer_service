@@ -28,7 +28,8 @@ SOURCES += main.cpp \
     wms/qgsxyzconnection.cpp \
     wms/qgsxyzconnectiondialog.cpp \
     wms/qgsxyzsourceselect.cpp \
-    ../sharedcodes/wstringutils.cpp
+    ../sharedcodes/wstringutils.cpp \
+    helperfunctions.cpp
 
 
 HEADERS += \
@@ -47,7 +48,8 @@ HEADERS += \
     wms/qgsxyzconnectiondialog.h \
     wms/qgsxyzsourceselect.h \
     httplib.h \
-    ../sharedcodes/wstringutils.h
+    ../sharedcodes/wstringutils.h \
+    helperfunctions.h
 
 
 #QGIS

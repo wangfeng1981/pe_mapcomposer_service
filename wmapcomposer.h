@@ -53,6 +53,7 @@
 #include <QDateTime>
 
 
+#include "helperfunctions.h"
 
 
 using namespace std;
@@ -190,6 +191,7 @@ private:
 
     int setLayoutItemFrameByJsonObject(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
     int setLayoutItemMapGrid(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
+    int setLayoutItemMapData(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
     int setLayoutItemLabel(QgsLayoutItem* item,const QJsonObject& jobj,string& error) ;
     int setLayoutItemShape(QgsLayoutItem* item ,const QJsonObject& jobj,string& error) ;
 

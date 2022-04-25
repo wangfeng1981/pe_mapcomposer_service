@@ -1341,6 +1341,10 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
 
     QList<QgsMapLayer*> layerList = m_project->layerTreeRoot()->layerOrder() ;
 
+
+    /// //////////////////////////////////////////////////////
+    /// 图层数组
+    ///
     QJsonArray layerArr ;
 
     //QMap<QString, QgsMapLayer *> layersMap = m_project->mapLayers();
@@ -1406,7 +1410,9 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
 
     }
 
-
+    /// //////////////////////////////////////////////////////
+    /// 作图元素数组
+    ///
     int loiIndex = 0 ;
     QJsonArray layoutitemsArray ;
     QList<QgsLayoutItem*> loItems ;
@@ -1440,7 +1446,11 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
             //data
             {
                 QJsonObject dataJsonObj ;
-                dataJsonObj.insert("proj" , mapitem->crs().authid() ) ;
+                QString authid1 = mapitem->crs().authid() ;
+                authid1 = authid1.replace("USER","INTERNAL") ;
+                dataJsonObj.insert("proj" , authid1 ) ;
+                dataJsonObj.insert("crsdescription" , mapitem->crs().description() ) ;
+                dataJsonObj.insert("authid" , authid1) ;
                 dataJsonObj.insert("scale" , mapitem->scale() ) ;
                 QgsRectangle mapextent = mapitem->extent() ;
 
@@ -1484,7 +1494,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
                 if( label->font().bold() ) fontJsonObj.insert("bold",1) ;
                 else fontJsonObj.insert("bold",0) ;
                 fontJsonObj.insert("color" , qcolor2JsonObject(label->fontColor())) ;
-                fontJsonObj.insert("size" , label->font().pointSize() );
+                fontJsonObj.insert("size" , label->font().pointSizeF() );
                 fontJsonObj.insert("align", alignFlag2String(label->hAlign()) ) ;
 
                 dataJsonObj.insert("font" , fontJsonObj) ;
@@ -1578,6 +1588,22 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     }
 
 
+    /// //////////////////////////////////////////////////////
+    /// 可用投影坐标系数组
+    ///
+    QJsonArray crsArr ;
+    {
+        for(int ic = 0 ; ic < OmcHelperFunctions::s_allCrsAuthidList.length(); ++ic ){
+            QJsonObject cobj1 ;
+            cobj1.insert("authid" , OmcHelperFunctions::s_allCrsAuthidList[ic] ) ;
+            cobj1.insert("crsdescription" , OmcHelperFunctions::s_allDescList[ic] ) ;
+            cobj1.insert("wkt" , OmcHelperFunctions::s_allWktList[ic] ) ;
+            crsArr.append(cobj1);
+        }
+    }
+
+
+
     QgsLayoutItemPage::Orientation orientation = layout->pageCollection()->page(0)->orientation() ;
     QJsonObject page ;
     if( orientation==QgsLayoutItemPage::Orientation::Portrait ) page.insert("dir","v") ;
@@ -1589,6 +1615,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     projJsonObj.insert("page", page) ;
     projJsonObj.insert("loitem_array" ,layoutitemsArray ) ;
     projJsonObj.insert("layer_array" , layerArr ) ;
+    projJsonObj.insert("crs_array" , crsArr ) ;
 
 
     QJsonDocument jdoc( projJsonObj ) ;
@@ -1705,6 +1732,8 @@ int WMapComposer::itemSetProperty(QString& jsondata,string&outJsonData,string&er
     if( loitype.compare("map") ==0 ){
         int ret2 = setLayoutItemMapGrid( item , jroot["grid"].toObject() , error ) ;
         if( ret2!=0 ) return ret2 ;
+        int ret3 = setLayoutItemMapData( item , jroot["data"].toObject() , error ) ;
+        if( ret3!=0 ) return ret3 ;
     }else if( loitype.compare("rect") == 0
               || loitype.compare("ell") == 0 )
     {
@@ -2175,7 +2204,7 @@ QJsonObject WMapComposer::extractMapItemGridData( QgsLayoutItemMap* mapItem)
             if( mapGrid->annotationFont().bold() ) fontJsonObj.insert("bold",1) ;
             else fontJsonObj.insert("bold",0) ;
             fontJsonObj.insert("color" , qcolor2JsonObject(mapGrid->annotationFontColor())) ;
-            fontJsonObj.insert("size" , mapGrid->annotationFont().pixelSize() );
+            fontJsonObj.insert("size" , mapGrid->annotationFont().pointSizeF() );
             fontJsonObj.insert("align","left") ;
             grid.insert("font" , fontJsonObj) ;
         }
@@ -2309,12 +2338,30 @@ int WMapComposer::setLayoutItemMapGrid(QgsLayoutItem* item,const QJsonObject& jo
         item1->grid()->setAnnotationEnabled(true);
         item1->grid()->setAnnotationFontColor(fontclr);
         item1->grid()->setAnnotationPrecision(0);
+        item1->grid()->setAnnotationFormat( QgsLayoutItemMapGrid::AnnotationFormat::DecimalWithSuffix);
         QFont tfont = item1->grid()->annotationFont() ;
         if( bold==0 ) tfont.setBold(false);
         else tfont.setBold(true);
-        tfont.setPixelSize(fontsize);
+        tfont.setPointSizeF(fontsize);
         item1->grid()->setAnnotationFont( tfont);
     }
+    return 0 ;
+}
+
+
+int WMapComposer::setLayoutItemMapData(QgsLayoutItem* item,const QJsonObject& jobj, string& error)
+{
+    QgsLayoutItemMap* item1 = dynamic_cast<QgsLayoutItemMap*>(item) ;
+    if( item1==nullptr ) {
+        error = "invalid QgsLayoutItemMap" ;
+        return 20 ;
+    }
+
+    QString authid = jobj["authid"].toString();
+    if( authid.compare("") == 0) authid="EPSG:4326" ;
+    item1->setCrs( QgsCoordinateReferenceSystem(authid) );
+    cout<<"reset map crs by authid:"<<authid.toStdString()<<endl ;
+
     return 0 ;
 }
 
