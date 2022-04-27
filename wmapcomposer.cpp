@@ -2091,8 +2091,8 @@ QJsonObject WMapComposer::extractLayoutItemData( QgsLayoutItem* item)
     QJsonObject obj ;
     obj.insert("uuid" , item->uuid()) ;
     obj.insert("name" , item->displayName() ) ;
-    obj.insert("left" , item->pagePositionWithUnits().x() ) ;
-    obj.insert("top" , item->pagePositionWithUnits().y() ) ;
+    obj.insert("left" , item->positionWithUnits().x() ) ;//2022-4-27
+    obj.insert("top" , item->positionWithUnits().y() ) ;
     obj.insert("width" , item->sizeWithUnits().width() ) ;
     obj.insert("height", item->sizeWithUnits().height() ) ;
     obj.insert("rot" , item->rotation() ) ;
@@ -2339,6 +2339,10 @@ int WMapComposer::setLayoutItemMapGrid(QgsLayoutItem* item,const QJsonObject& jo
         item1->grid()->setAnnotationFontColor(fontclr);
         item1->grid()->setAnnotationPrecision(0);
         item1->grid()->setAnnotationFormat( QgsLayoutItemMapGrid::AnnotationFormat::DecimalWithSuffix);
+        item1->grid()->setAnnotationDisplay(QgsLayoutItemMapGrid::DisplayMode::LongitudeOnly, QgsLayoutItemMapGrid::BorderSide::Top );
+        item1->grid()->setAnnotationDisplay(QgsLayoutItemMapGrid::DisplayMode::LongitudeOnly, QgsLayoutItemMapGrid::BorderSide::Bottom );
+        item1->grid()->setAnnotationDisplay(QgsLayoutItemMapGrid::DisplayMode::LatitudeOnly, QgsLayoutItemMapGrid::BorderSide::Left );
+        item1->grid()->setAnnotationDisplay(QgsLayoutItemMapGrid::DisplayMode::LatitudeOnly, QgsLayoutItemMapGrid::BorderSide::Right );
         QFont tfont = item1->grid()->annotationFont() ;
         if( bold==0 ) tfont.setBold(false);
         else tfont.setBold(true);

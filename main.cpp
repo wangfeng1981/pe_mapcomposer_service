@@ -154,6 +154,8 @@ int main(int argc, char *argv[])
     cout<<"v0.0.6 addmap x0,x1,y0,y1 2022-4-19"<<endl ;
     cout<<"v0.0.7 2022-4-21"<<endl ;
     cout<<"v0.0.9 2022-4-25 add crs list for MapItem"<<endl ;
+    cout<<"v0.0.10.1 2022-4-27 map pos and size."<<endl ;
+    cout<<"v0.0.11r 2022-4-27"<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
