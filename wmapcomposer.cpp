@@ -16,6 +16,7 @@ WMapComposer::WMapComposer(QString pedir,QString resdir)
             bool mkgood = omcOutDir.mkdir(m_omcOutDirAbsPath) ;
             if( mkgood==false ){
                 qDebug()<<"Critical : make omc_out subdir failed. exit(13)" ;
+                spdlog::critical("Critical : make omc_out subdir failed. exit(13)");
                 exit(13) ;
             }
         }
@@ -39,12 +40,15 @@ string WMapComposer::getMethodAPIs()
     out += "layout.addrect:file,\n" ;
     out += "layout.addell:file,\n" ;
     out += "layout.addarrow:file,\n" ;
+    out += "layout.addstylelegend:file,stylefile,\n" ;
     out += "layout.deleteitem: file,uuid, \n" ;
     out += "project.addwms: file,capurl,tms,layers,styleid,datetime,sdui,roiid\n" ;
     out += "project.addvec:file,vecname,vecfile\n" ;
     out += "project.new:\n" ;
+    out += "project.newfromtem:temfile\n" ;
     out += "project.export:file,dpi\n" ;
     out += "project.deletelayer:file,lyrid\n" ;
+    out += "project.zoom:file,left,right,top,bottom,mapuuid(opt)\n" ;
     out += "item.move:file,left,top,uuid\n" ;
     out += "item.resize:file,uuid,width,height\n" ;
     out += "map.setextent: file,mapuuid,xmin,xmax,ymin,ymax\n" ;
@@ -52,6 +56,7 @@ string WMapComposer::getMethodAPIs()
     out += "layer.setproperty : file,qlyrid,type2,...a lot...\n" ;
     out += "layout.setpage : file,dir(v|h) \n" ;
     out += "layout.exportimg : file,dpi,clip (clip means cliptoextent) \n" ;
+    out += "layout.makethumb : file,outfile \n" ;
     out += "--- methods end   ---\n" ;
     return out ;
 }
@@ -69,6 +74,9 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     outJsonData = "{}" ;
     if( method == "project.new" ){
         return this->projectNew(jsondata , outJsonData, error) ;
+    }
+    else if( method == "project.newfromtem" ){
+        return this->projectNewFromTemplate(jsondata,outJsonData,error) ;
     }
     else if( method=="project.addwms")
     {
@@ -104,6 +112,9 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     else if( method=="layout.addarrow"){
         return this->layoutAddArrow(jsondata, outJsonData,error) ;
     }
+    else if( method=="layout.addstylelegend"){
+        return this->layoutAddStyleLegend(jsondata, outJsonData,error) ;
+    }
     else if(method=="project.addvec")
     {
         return this->projectAddVec(jsondata, outJsonData,error) ;
@@ -135,6 +146,12 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     }
     else if( method=="layout.exportimg" ){
         return this->layoutExportImage(jsondata,outJsonData,error) ;
+    }
+    else if( method=="layout.makethumb" ){
+        return this->layoutMakeThumb(jsondata,outJsonData,error) ;
+    }
+    else if( method=="project.zoom" ){
+        return this->projectZoom(jsondata,outJsonData,error) ;
     }
     error = "not supported method:'"+method+"'." ;
     cout<<"not supported method:"<<method<<endl ;
@@ -195,6 +212,7 @@ int WMapComposer::projectNew(QString& jsondata, string& outJsonData,string& erro
             bool mkdirok = qdir.mkdir(dayDirAbs) ;
             if( mkdirok==false ){
                 qDebug()<<"Critical : failed to make day dir:"<<dayDirAbs<<". exit(14)." ;
+                spdlog::critical("Critical : failed to make day dir:{}", dayDirAbs.toStdString().c_str());
                 exit(14) ;
             }
         }
@@ -232,8 +250,69 @@ int WMapComposer::projectNew(QString& jsondata, string& outJsonData,string& erro
     return 0 ;
 }
 
+// 从模板创建绘图工程 2022-5-24
+int WMapComposer::projectNewFromTemplate(QString& jsondata,string& outJsonData,string& error)
+{
+    // jsondata 中需要有temfile 字段表示模板qgis文件的相对路径
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+
+    string temfile = jdoc.object().value("temfile").toString().toStdString() ;
+    cout<<"temfile:"<<temfile<<endl ;
+    if(temfile==""){
+        error = "empty temfile." ;
+        return 2 ;
+    }
+
+    //生成新的qgs文件路径
+    //create daily subdir
+    QString ymdStr = QDate::currentDate().toString("yyyyMMdd") ;
+    QString dayDirAbs ;
+    {
+        dayDirAbs = m_omcOutDirAbsPath + ymdStr + "/" ;
+        QDir qdir(dayDirAbs) ;
+        if( qdir.exists() ==false ){
+            qDebug()<<"try to make day dir:"<<dayDirAbs ;
+            bool mkdirok = qdir.mkdir(dayDirAbs) ;
+            if( mkdirok==false ){
+                qDebug()<<"Critical : failed to make day dir:"<<dayDirAbs<<". exit(14)." ;
+                spdlog::critical("Critical : failed to make day dir:{}", dayDirAbs.toStdString().c_str());
+                exit(14) ;
+            }
+        }
+    }
+    QString newqgsfilename =dayDirAbs + QTime::currentTime().toString("HHmmss")
+            + "-" + QString::number(qrand()%10000).rightJustified(4,'0') + ".qgs" ;
+
+    //关闭老文件，打开模板文件
+    int code1 = checkAndResetProjectFile(temfile , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    //另存为...
+    qDebug()<<"newqgsfilename:"<<newqgsfilename  ;
+    bool wok = this->m_project->write(newqgsfilename) ;
+    if( wok==false ){
+        error = "failed to write new file." ;
+        return 3 ;
+    }
+
+
+    //返回
+    QString relNewfilename = newqgsfilename.replace(m_pedir,"") ;
+    outJsonData = "{\"file\":\""+relNewfilename.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+
 
 // jsondata: file,capurl,tms,layers,styleid,datetime,sdui,roiid
+// 2022-5-25 检查qgs是否有placeholder group，有的话加到group里面，反之正常添加图层即可。
 int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string& error)
 {
     // JSON //////////////////////////////////////
@@ -316,7 +395,9 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
         uri1.setParam( QStringLiteral( "format" ), "image/png" );
         uri1.setParam( QStringLiteral( "crs" ), "EPSG:4326" );
         QString dimsStr = QString("datetime=")+QString::number(wmsDatetime)
-                + ";styleid="+QString::number(wmsStyleid)+";sdui="+wmsSdui+";roiid="+wmsRoiid ;
+                + ";styleid="+QString::number(wmsStyleid)
+                + ";sdui="+wmsSdui
+                + ";roiid="+wmsRoiid ;
         //uri1.setParam( QStringLiteral( "tileDimensions" ), "datetime=20200600000000;styleid=2;sdui=null" );
         uri1.setParam( QStringLiteral( "tileDimensions" ), dimsStr );
     }
@@ -327,11 +408,22 @@ int WMapComposer::projectAddWms(QString& jsondata , string& outJsonData ,string&
     if( rlayer->isValid() )
     {
         qDebug()<<"rlayer good";
-        m_project->addMapLayer(rlayer);
+        rlayer->setCustomProperty("styleid", QVariant::fromValue(wmsStyleid)) ;
+        //检查是否有placeholder group
+        QgsLayerTreeGroup* plgroup = this->m_project->layerTreeRoot()->findGroup("placeholder") ;
+        if( plgroup != nullptr )
+        {
+            m_project->addMapLayer(rlayer,false);
+            plgroup->addLayer(rlayer) ;
+        }else{
+            m_project->addMapLayer(rlayer);
+        }
     }else{
         qDebug()<<"rlayer bad,"<< rlayer->error().message();
-        delete rlayer;
-        error = "bad wms layer:"+rlayer->error().message().toStdString() ;
+        // delete rlayer; //bugfixed 2022-5-25, we can not delete this pointer.
+        spdlog::error("WMapComposer::projectAddWms failed. rlayer is invalid: {}",
+                      rlayer->error().message().toStdString()) ;
+        error = "rlayer is not valid." ;
         return 4 ;
     }
 
@@ -1018,7 +1110,177 @@ int WMapComposer::mapSetExtent(QString& jsondata,string&outJsonData,string&error
     return 0 ;
 }
 
+/// 2022-5-27 file,left,right,top,bottom,mapuuid(optional)
+/// 如果指定了 mapuuid 那么缩放该map，否则只缩放第一个map
+/// 这里 left,right,top,bottom 为经纬度，会自动转换成map的坐标范围。
+int WMapComposer::projectZoom(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
 
+    QString mapuuid = "" ;
+    if( jroot.contains("mapuuid") == true ){
+        mapuuid = jroot["mapuuid"].toString();
+    }
+    cout<<"mapuuid:"<<mapuuid.toStdString()<<endl ;
+
+    double left = getJsonObjDoubleValue(jroot , "left") ;
+    double right = getJsonObjDoubleValue(jroot , "right") ;
+    double top = getJsonObjDoubleValue(jroot , "top") ;
+    double bottom = getJsonObjDoubleValue(jroot , "bottom") ;
+    cout<<"wgs84:"<<endl ;
+    cout<<"xmin:"<<left<<endl ;
+    cout<<"xmax:"<<right<<endl ;
+    cout<<"ymin:"<<bottom<<endl ;
+    cout<<"ymax:"<<top<<endl ;
+
+
+    // //////////////////////////////////////////////
+
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItemMap* mapitem = nullptr;// dynamic_cast<QgsLayoutItemMap*>(*it) ;
+    if( mapuuid.isEmpty()==true ){
+        mapitem = this->findFirstLayoutItemMap(layout) ;
+    }else{
+        mapitem = (QgsLayoutItemMap*)this->findLayoutItemByUuid(layout , mapuuid.toStdString() ) ;
+    }
+
+    if( mapitem==nullptr ){
+        error = "failed to find map item." ;
+        return 13 ;
+    }
+
+    QgsCoordinateReferenceSystem mapCrs = mapitem->crs() ;
+    QgsCoordinateReferenceSystem wgs84Crs("EPSG:4326") ;
+    QgsCoordinateTransform wgs84ToMapCrs( wgs84Crs , mapCrs , m_project ) ;
+    QgsRectangle wgs84Rect(left,bottom,right,top) ;
+    QgsRectangle mapRect = wgs84ToMapCrs.transformBoundingBox(wgs84Rect,
+                                                              QgsCoordinateTransform::TransformDirection::ForwardTransform
+                                                              ,true) ;
+    cout<<"mapCrs:"<<endl ;
+    cout<<"xmin:"<<mapRect.xMinimum()<<endl ;
+    cout<<"xmax:"<<mapRect.xMaximum()<<endl ;
+    cout<<"ymin:"<<mapRect.yMinimum()<<endl ;
+    cout<<"ymax:"<<mapRect.yMaximum()<<endl ;
+    mapitem->setExtent( mapRect );
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+
+    outJsonData = "{\"uuid\":\""+mapuuid.toStdString()+"\"}" ;
+    return 0 ;
+}
+
+/// file,stylefile
+int WMapComposer::layoutAddStyleLegend(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    if( jroot.contains("stylefile") == false ){
+        error = "empty stylefile." ;
+        return 21 ;
+    }
+    QString styleFile = jroot["stylefile"].toString() ;//相对.json路径
+    double left = 0;//jroot["left"].as<double>() ;
+    double top =  0;//jroot["top"].as<double>() ;
+
+    // //////////////////////////////////////////////
+    QString fullstylefilepath = m_pedir + styleFile ;
+    //在style.json路径下生成 style.json.dpi72.png 的图片
+    //如果图片已有直接以图片的形式加进来，否则生成之。
+    //当执行export命令的时候，dpi使用用户输入的替换，规则一样，有则用之，没有生成之。
+
+    QString fullpngfilepath = fullstylefilepath + ".dpi72.png" ;
+    QFile pngFile(fullpngfilepath) ;
+    int pngWid = 0 ;
+    int pngHei = 0 ;
+    if( pngFile.exists()==false ){
+        qDebug()<<"no style png file, make it...";
+
+        PeLegend pel ;
+        string pelError ;
+        int pelcode = pel.makePngByJsonFile(fullstylefilepath.toStdString()
+                              , fullpngfilepath.toStdString()
+                              , 72 , pelError ) ;
+        if( pelcode != 0 ){
+            qDebug()<<"make png failed: "<<pelcode<<". "<<pelError.c_str() ;
+            error = pelError ;
+            return 22 ;
+        }
+        qDebug()<<"make png ok." ;
+        pngWid = pel.outPngWid ;
+        pngHei = pel.outPngHei ;
+    }else{
+        qDebug()<<"has style png file." ;
+    }
+
+    //add to layout
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItemPicture* item = QgsLayoutItemPicture::create(layout) ;
+    item->setPicturePath(fullpngfilepath);
+    item->setPos(left,top);
+    item->attemptResize(QgsLayoutSize(pngWid,pngHei));
+    item->setId( QString("style:")+styleFile );
+    layout->addLayoutItem(item);
+
+    // SAVE //////////////////////////////////
+    bool wok = this->m_project->write() ;
+    if( wok==false ){
+        error = "failed to write file." ;
+        return 3 ;
+    }
+    // ///////////////////////////////////////
+    outJsonData = "{\"uuid\":\""+item->uuid().toStdString()+"\"}" ;
+
+    return 0 ;
+
+
+
+
+}
 
 
 
@@ -1339,6 +1601,44 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         return 0 ;
     }
 
+    //theme
+    QJsonArray themeArrJson ;
+    {
+        qDebug()<<"Theme:" ;
+
+        //has none named theme
+        QStringList lyridlist0 ;
+        if( hasNoneNamedTheme(m_project,lyridlist0) == true ){
+            QJsonObject themeObj ;
+            themeObj.insert("name", "") ;
+            QJsonArray lyridjsonArr ;
+            for(int il = 0 ;il < lyridlist0.length();++ il ){
+                lyridjsonArr.append( lyridlist0[il] );
+            }
+            themeObj.insert("vislyrid", lyridjsonArr) ;
+            themeArrJson.append(themeObj);
+        }
+
+        QgsMapThemeCollection* themeCollection = m_project->mapThemeCollection() ;
+        QStringList mapThemeNameList = themeCollection->mapThemes() ;
+        if( mapThemeNameList.length()>0 ){
+            for(int iname = 0 ; iname < mapThemeNameList.length() ; ++ iname ){
+                qDebug()<<iname<<","<<mapThemeNameList[iname] ;
+                QJsonObject themeObj ;
+                themeObj.insert("name", mapThemeNameList[iname]) ;
+                QStringList lyridlist = themeCollection->mapThemeVisibleLayerIds( mapThemeNameList[iname] ) ;
+                QJsonArray lyridjsonArr ;
+                for(int il = 0 ;il < lyridlist.length();++ il ){
+                    lyridjsonArr.append( lyridlist[il] );
+                }
+                themeObj.insert("vislyrid", lyridjsonArr) ;
+                themeArrJson.append(themeObj);
+            }
+        }
+    }
+
+
+
     QList<QgsMapLayer*> layerList = m_project->layerTreeRoot()->layerOrder() ;
 
 
@@ -1355,10 +1655,13 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         QJsonObject lyrObj ;
         lyrObj.insert( "qlyrid" , qlayer->id() ) ;
         lyrObj.insert("name",qlayer->name() );
+        qDebug()<<"layerName:" << qlayer->name() ;
 
         bool lyrok = true ;
         if( qlayer->type()== QgsMapLayerType::RasterLayer ){
             lyrObj.insert( "type" , "wms") ;
+            lyrObj.insert("styleid" , qlayer->customProperty("styleid",0).toInt()) ;
+
         }else if( qlayer->type()== QgsMapLayerType::VectorLayer )
         {
             QgsVectorLayer* veclayer = dynamic_cast<QgsVectorLayer*>( qlayer ) ;
@@ -1399,7 +1702,8 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
                 lyrok=false ;
             }
             lyrObj.insert( "type" , "vec") ;
-        }else{
+        }
+        else{
             qDebug()<<"Warning : unsupported layer type:"<< (int) qlayer->type() << " , skip it."  ;
             lyrok = false ;
         }
@@ -1430,8 +1734,6 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         QString relPngFile = reloutfilenameroot + "-" + QString::number(loiIndex) + ".png";
         QString absPngFile = m_pedir + relPngFile ;
 
-
-
         QJsonObject itemJsonObj  ;
 
         QJsonObject lo_obj = extractLayoutItemData(*it) ;
@@ -1460,6 +1762,16 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
                 extentJsonObj.insert("ymin" , mapextent.yMinimum() ) ;
                 extentJsonObj.insert("ymax" , mapextent.yMaximum() ) ;
                 dataJsonObj.insert("extent" , extentJsonObj) ;
+
+                //theme
+                if( mapitem->followVisibilityPreset() ) {
+                    dataJsonObj.insert("following_vis_preset" , 1) ;
+
+                }else{
+                    dataJsonObj.insert("following_vis_preset" , 0) ;
+                }
+                dataJsonObj.insert("vis_preset" , mapitem->followVisibilityPresetName()) ;
+
                 itemJsonObj.insert("data", dataJsonObj) ;
             }
 
@@ -1616,6 +1928,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     projJsonObj.insert("loitem_array" ,layoutitemsArray ) ;
     projJsonObj.insert("layer_array" , layerArr ) ;
     projJsonObj.insert("crs_array" , crsArr ) ;
+    projJsonObj.insert("theme_array", themeArrJson ) ;
 
 
     QJsonDocument jdoc( projJsonObj ) ;
@@ -1734,6 +2047,7 @@ int WMapComposer::itemSetProperty(QString& jsondata,string&outJsonData,string&er
         if( ret2!=0 ) return ret2 ;
         int ret3 = setLayoutItemMapData( item , jroot["data"].toObject() , error ) ;
         if( ret3!=0 ) return ret3 ;
+
     }else if( loitype.compare("rect") == 0
               || loitype.compare("ell") == 0 )
     {
@@ -1917,6 +2231,10 @@ int WMapComposer::layoutExportImage(QString& jsondata,string& outJsonData,string
         return 12 ;
     }
 
+    //替换style:xxxx.json 图像元素的图片
+    updateStyleLegendImagesByDpi(layout , dpi );
+
+
     layout->refresh();
     QgsLayoutExporter exporter(layout);
     bool saveok = false ;
@@ -1949,6 +2267,55 @@ int WMapComposer::layoutExportImage(QString& jsondata,string& outJsonData,string
     return 0 ;
 }
 
+/// layout.makethumb : file,outfile
+int WMapComposer::layoutMakeThumb(QString& jsondata,string& outJsonData,string& error)
+{
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    string outrelfilepath = jroot["outfile"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    cout<<"outfile:"<<outrelfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    if(outrelfilepath==""){
+        error = "empty outrelfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+    int dpi = 30 ;
+
+    // //////////////////////////////////////////////
+    QString absoutputPngfile = m_pedir + QString::fromStdString( outrelfilepath ) ;
+    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    if( layout==nullptr ){
+        error = "failed to get layout('1') pointer." ;
+        return 12 ;
+    }
+    layout->refresh();
+    QgsLayoutExporter exporter(layout);
+    bool saveok = false ;
+    {
+        QImage outImage = exporter.renderPageToImage(0,QSize() , dpi) ;
+        saveok = outImage.save( absoutputPngfile ) ;
+    }
+
+    if( saveok==false ){
+        error = "save export image file failed." ;
+        return 13 ;
+    }
+    outJsonData = "{\"succ\":1}" ;
+    return 0 ;
+}
 
 
 
@@ -2366,6 +2733,14 @@ int WMapComposer::setLayoutItemMapData(QgsLayoutItem* item,const QJsonObject& jo
     item1->setCrs( QgsCoordinateReferenceSystem(authid) );
     cout<<"reset map crs by authid:"<<authid.toStdString()<<endl ;
 
+    if( jobj["following_vis_preset"].toInt()==1 )
+    {
+        item1->setFollowVisibilityPreset(true);
+    }else{
+        item1->setFollowVisibilityPreset(false);
+    }
+    item1->setFollowVisibilityPresetName( jobj["vis_preset"].toString() );
+
     return 0 ;
 }
 
@@ -2752,6 +3127,87 @@ int WMapComposer::setLayerPolySymbol(QgsVectorLayer*layer,const QJsonObject& sym
     return 0;
 }
 
+//2022-5-25 是否有未命名theme
+bool WMapComposer::hasNoneNamedTheme(QgsProject* prj, QStringList& ref_vislyridlist )
+{
+    assert(prj!=nullptr) ;
+    QgsLayerTreeGroup *root = prj->layerTreeRoot();
+    QgsLayerTree emptyLayerTree ;
+    QgsLayerTreeModel model( &emptyLayerTree ) ;
+    QgsMapThemeCollection::MapThemeRecord mtrecord
+            = QgsMapThemeCollection::createThemeFromCurrentState( root, &model );
 
+    QStringList themeNameList = prj->mapThemeCollection()->mapThemes() ;
+    for(int iname = 0 ; iname < themeNameList.length(); ++ iname ){
+        QgsMapThemeCollection::MapThemeRecord mtrec2 =
+                prj->mapThemeCollection()->mapThemeState( themeNameList[iname] ) ;
+        if( mtrecord == mtrec2 ){
+            return false ;
+        }
+    }
+    QList<QgsMapThemeCollection::MapThemeLayerRecord> recordlist = mtrecord.layerRecords() ;
+    for(QgsMapThemeCollection::MapThemeLayerRecord rec1 : recordlist)
+    {
+        if( rec1.isVisible==true ){
+            ref_vislyridlist.append( rec1.layer()->id() );
+        }else {
+            //skip
+        }
+    }
+    return true ;
+}
 
+//2022-5-27 如果没有返回null
+QgsLayoutItemMap* WMapComposer::findFirstLayoutItemMap(QgsLayout* layout)
+{
+    QList<QgsLayoutItem*> itemList ;
+    layout->layoutItems( itemList ) ;
+    for(auto it = itemList.begin() ; it != itemList.end() ; ++ it )
+    {
+        if( (*it)->type() == QgsLayoutItemRegistry::ItemType::LayoutMap ) {
+            return (QgsLayoutItemMap*)(*it) ;
+        }
+    }
+    return nullptr ;
+}
 
+//2022-5-30
+void WMapComposer::updateStyleLegendImagesByDpi(QgsPrintLayout* layout,int dpi)
+{
+    QString tailname = QString(".dpi") + QString::number(dpi) + ".png" ;
+    QList<QgsLayoutItem*> itemList ;
+    layout->layoutItems( itemList ) ;
+    for(auto it = itemList.begin() ; it != itemList.end() ; ++ it )
+    {
+        if( (*it)->type() == QgsLayoutItemRegistry::ItemType::LayoutPicture ) {
+            QgsLayoutItemPicture* picture = (QgsLayoutItemPicture*)(*it) ;
+            if( picture->id().length() > 6 ){
+                QString prefix = picture->id().left(6) ;
+                if( prefix.compare("style:") == 0 )
+                {
+                    QString relJsonFile = picture->id().mid(6) ;
+                    QString fullJsonFile = m_pedir + relJsonFile ;
+                    QString fullPngDpiFile = fullJsonFile + tailname ;
+                    QFile pngFileObj(fullPngDpiFile) ;
+                    if( pngFileObj.exists()==true ){
+                        picture->setPicturePath(fullPngDpiFile);
+                    }else{
+                        qDebug()<<"making new png "<<fullPngDpiFile ;
+                        PeLegend pel ;
+                        string pelError ;
+                        int pelcode = pel.makePngByJsonFile(fullJsonFile.toStdString()
+                                                            , fullPngDpiFile.toStdString()
+                                                            , dpi , pelError) ;
+                        if( pelcode!=0 ){
+                            qDebug()<<"making failed:"<<pelcode<<" , "<<pelError.c_str() ;
+                        }else{
+                            qDebug()<<"making good." ;
+                            picture->setPicturePath(fullPngDpiFile);
+                        }
+                    }
+
+                }
+            }
+        }
+    }
+}

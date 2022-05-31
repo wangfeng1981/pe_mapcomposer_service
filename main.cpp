@@ -59,6 +59,9 @@
 #include "../sharedcodes/wstringutils.h"
 #include "helperfunctions.h"
 
+//spdlog
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/basic_file_sink.h"
 
 
 using namespace std;
@@ -156,6 +159,10 @@ int main(int argc, char *argv[])
     cout<<"v0.0.9 2022-4-25 add crs list for MapItem"<<endl ;
     cout<<"v0.0.10.1 2022-4-27 map pos and size."<<endl ;
     cout<<"v0.0.11r 2022-4-27"<<endl ;
+    cout<<"v0.1.0.1 2022-5-24 new from template;add layer group; spdlog."<<endl ;
+    cout<<"v0.1.1.0 2022-5-27 project.zoom."<<endl ;
+    cout<<"v0.1.2.1 2022-5-30 stylelegend."<<endl ;
+    cout<<"v0.1.2.2 2022-5-31 commit."<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
@@ -176,8 +183,16 @@ int main(int argc, char *argv[])
     OmcHelperFunctions::loadAllCrs() ;
     cout<<"Loaded Crs count:"<<OmcHelperFunctions::s_allCrsAuthidList.length()<<endl ;
 
+
+    ///////////////////////////////////////////////////////
+    /// spdlog
+    auto logger = spdlog::basic_logger_mt("l", "pe_mapcomposer_service_spdlog.log" );
+    spdlog::flush_every(std::chrono::seconds(1));
+    spdlog::set_default_logger(logger);
+
     if( argc!=2 ){
         cout<<"argc not 2"<<endl ;
+        spdlog::critical("argc not 2.");
         return 11 ;
     }
 
@@ -186,6 +201,7 @@ int main(int argc, char *argv[])
     bool jsonok = loadTask17Config(task17configfile, peDir, resDir , httpPort, zmqPort ) ;
     if( jsonok==false ){
         cout<<"parse config json failed."<<endl ;
+        spdlog::critical("parse config json failed.");
         return 12 ;
     }
     qDebug()<<"pedir,omc_resdir,omc_port:"<<peDir<<","<<resDir<<","<<httpPort<<endl ;
@@ -217,6 +233,7 @@ int main(int argc, char *argv[])
     int   mainRc = zmq_bind (mainResponder, address0.c_str() );
     if( mainRc != 0 ){
         cout<<"main zeromq bind failed."<<endl ;
+        spdlog::critical("main zeromq bind failed.");
         return 15 ;
     }
 
@@ -268,5 +285,6 @@ int main(int argc, char *argv[])
     cout<<"qt exec ... ..."<<endl ;
     a.exec() ;
     cout<<"service out."<<endl;
+    spdlog::critical("service out.");
     return 0;
 }

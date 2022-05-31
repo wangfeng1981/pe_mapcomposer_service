@@ -43,6 +43,10 @@
 #include "qgssinglesymbolrenderer.h"
 #include "qgsmarkersymbollayer.h"
 
+#include "qgslayertreenode.h"
+#include "qgslayertreegroup.h"
+#include "qgsmapthemecollection.h"
+
 
 #include <QTextStream>
 #include <QJsonDocument>
@@ -55,6 +59,9 @@
 
 #include "helperfunctions.h"
 
+#include "spdlog/spdlog.h"
+
+#include "pelegend.h" ;
 
 using namespace std;
 using namespace ArduinoJson;
@@ -80,6 +87,8 @@ public:
     int run(string method,QString& jsondata,string& outJsonData, string& error) ;
 
     int projectNew(QString& jsondata,string& outJsonData,string& error) ;
+    int projectNewFromTemplate(QString& jsondata,string& outJsonData,string& error) ;
+
 
     ///
     /// \brief projectAddWms support wQStringms,wmts
@@ -88,6 +97,7 @@ public:
     /// \return
     ///
     int projectAddWms(QString& jsondata,string& outJsonData,string& error) ;
+
 
     /// file,left,top,width,height
     int layoutAddMap(QString& jsondata,string& outJsonData,string& error) ;
@@ -101,6 +111,8 @@ public:
     int layoutAddImage(QString& jsondata,string& outJsonData,string& error) ;
     /// file,left,top,width,height
     int layoutAddNorth(QString& jsondata,string& outJsonData,string& error) ;
+    /// file,stylefile
+    int layoutAddStyleLegend(QString& jsondata,string& outJsonData,string& error) ;
 
     /// file,left,top,width,height
     ///
@@ -135,7 +147,12 @@ public:
     /// layout.exportimg : file,dpi,clip (clip means cliptoextent)
     int layoutExportImage(QString& jsondata,string& outJsonData,string& error) ;
 
+    /// layout.makethumb : file,outfile
+    int layoutMakeThumb(QString& jsondata,string& outJsonData,string& error) ;
 
+
+    /// 2022-5-27 file,left,right,top,bottom,mapuuid(optional)
+    int projectZoom(QString& jsondata,string& outJsonData,string& error) ;
 
     /// one method one line...
     string getMethodAPIs() ;
@@ -153,6 +170,9 @@ private:
                       QgsLayout* pLayout ) ;
 
     QgsLayoutItem* findLayoutItemByUuid(QgsLayout* layout,string uuid) ;
+    //2022-5-27 如果没有返回null
+    QgsLayoutItemMap* findFirstLayoutItemMap(QgsLayout* layout) ;
+
     QgsMapLayer* findMapLayerByLyrid(QString lyrid) ;
 
     /// outjsonfile is full absfilepath
@@ -202,6 +222,12 @@ private:
     int setLayerPointSymbol(QgsVectorLayer*layer,const QJsonObject& symObj,string& error) ;
     int setLayerLineSymbol(QgsVectorLayer*layer, const QJsonObject& symObj,string& error) ;
     int setLayerPolySymbol(QgsVectorLayer*layer, const QJsonObject& symObj,string& error) ;
+
+    //2022-5-25 是否有未命名theme,若有未命名的theme，返回true，并将可见的图层id赋予ref_vislyridlist中
+    bool hasNoneNamedTheme(QgsProject* prj, QStringList& ref_vislyridlist) ;
+
+    //2022-5-30 检查layout中的style:xxx.json item，然后使用dpi的图片进行替换source
+    void updateStyleLegendImagesByDpi(QgsPrintLayout* layout,int dpi) ;
 
 };
 

@@ -29,7 +29,9 @@ SOURCES += main.cpp \
     wms/qgsxyzconnectiondialog.cpp \
     wms/qgsxyzsourceselect.cpp \
     ../sharedcodes/wstringutils.cpp \
-    helperfunctions.cpp
+    helperfunctions.cpp \
+    ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegend.cpp \
+    ../sharedcodes/wdirtools.cpp
 
 
 HEADERS += \
@@ -49,7 +51,9 @@ HEADERS += \
     wms/qgsxyzsourceselect.h \
     httplib.h \
     ../sharedcodes/wstringutils.h \
-    helperfunctions.h
+    helperfunctions.h \
+    ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegend.h \
+    ../sharedcodes/wdirtools.h
 
 
 #QGIS
@@ -82,6 +86,14 @@ LIBS += -L"/usr/lib" -lgdal
 #zeromq
 INCLUDEPATH += "/usr/local/include"
 LIBS += -L"/usr/local/lib" -lzmq
+
+#spdlog
+INCLUDEPATH += "../sharedcodes"
+
+#cairo
+INCLUDEPATH += "/home/hadoop/IdeaProjects/PixelEngine_TileCompute/pe_tilecompute/pelegend"
+INCLUDEPATH += "/usr/include/cairo"
+LIBS += -L"/usr/lib/x86_64-linux-gnu" -lcairo
 
 
 
