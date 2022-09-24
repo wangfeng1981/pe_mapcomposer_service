@@ -52,6 +52,7 @@ string WMapComposer::getMethodAPIs()
     out += "item.move:file,left,top,uuid\n" ;
     out += "item.resize:file,uuid,width,height\n" ;
     out += "map.setextent: file,mapuuid,xmin,xmax,ymin,ymax\n" ;
+    out += "map.setextentndraw: file,mapuuid,dpi,xmin,xmax,ymin,ymax" ;
     out += "item.setproperty : file,uuid,loitype,...a lot...\n" ;
     out += "layer.setproperty : file,qlyrid,type2,...a lot...\n" ;
     out += "layout.setpage : file,dir(v|h) \n" ;
@@ -131,7 +132,11 @@ int WMapComposer::run(string method,QString& jsondata,string& outJsonData, strin
     }
     else if( method=="map.setextent"){
         return this->mapSetExtent(jsondata,outJsonData,error) ;
-    }else if( method=="layout.deleteitem"){
+    }
+    else if( method=="map.setextentndraw"){
+        return this->mapSetExtentAndDraw(jsondata,outJsonData,error) ;
+    }
+    else if( method=="layout.deleteitem"){
         return this->layoutDeleteItem(jsondata,outJsonData,error) ;
     }
     else if( method=="project.deletelayer"){
@@ -487,7 +492,7 @@ int WMapComposer::layoutAddMap(QString& jsondata , string& outJsonData,string& e
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout( this->m_project ) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 2 ;
@@ -584,7 +589,7 @@ int WMapComposer::layoutAddLabel(QString& jsondata , string& outJsonData ,string
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout( this->m_project ) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 2 ;
@@ -640,7 +645,7 @@ int WMapComposer::layoutAddScaleBar(QString& jsondata  , string& outJsonData ,st
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -729,7 +734,7 @@ int WMapComposer::layoutAddLegend(QString& jsondata , string& outJsonData ,strin
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -799,7 +804,7 @@ int WMapComposer::layoutAddImage(QString& jsondata , string& outJsonData ,string
 
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ; ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -863,7 +868,7 @@ int WMapComposer::layoutAddNorth(QString& jsondata , string& outJsonData ,string
 
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -938,7 +943,7 @@ int WMapComposer::itemMove(QString&jsondata,string&outJsonData,string&error)
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project)  ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -995,7 +1000,7 @@ int WMapComposer::itemResize(QString&jsondata,string&outJsonData,string&error)
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1070,7 +1075,7 @@ int WMapComposer::mapSetExtent(QString& jsondata,string&outJsonData,string&error
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1106,6 +1111,78 @@ int WMapComposer::mapSetExtent(QString& jsondata,string&outJsonData,string&error
     }
     // ///////////////////////////////////////
     outJsonData = "{\"uuid\":\""+mapuuid.toStdString()+"\"}" ;
+
+    return 0 ;
+}
+
+
+//2022-9-18 file,mapuuid,dpi,xmin,xmax,ymin,ymax
+int WMapComposer::mapSetExtentAndDraw(QString& jsondata,
+                                            string& outJsonData,string& error)
+{
+    string outjson1;
+    string error1;
+    int ret1 = mapSetExtent(jsondata,outjson1,error1);
+    if( ret1!=0 ){
+        error = string("layoutMapSetExtentAndDraw mapSetExtent failed:")
+                +error1 + "." ;
+        return 21 ;
+    }
+
+    // json and project ////////////////////////////
+    if( this->m_project==nullptr ) this->m_project = QgsProject::instance() ;
+    QJsonDocument jdoc = QJsonDocument::fromJson(jsondata.toUtf8()) ;
+    if( jdoc.isNull() ){
+        error="failed parser json.";
+        return 1;
+    }
+    QJsonObject jroot = jdoc.object() ;
+    string relfilepath = jroot["file"].toString().toStdString() ;
+    cout<<"file:"<<relfilepath<<endl ;
+    if(relfilepath==""){
+        error = "empty relfilepath." ;
+        return 2 ;
+    }
+    int code1 = checkAndResetProjectFile(relfilepath , error ) ;
+    if( code1 != 0 ) return code1 ;
+
+    QString mapuuid = jroot["mapuuid"].toString() ;
+    int dpi = getJsonObjDoubleValue(jroot,"dpi") ;
+    // //////////////////////////////////////////////
+
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
+    if( layout==nullptr ){
+        error = "failed to get layout pointer." ;
+        return 12 ;
+    }
+
+    QgsLayoutItem* theItem = this->findLayoutItemByUuid(layout , mapuuid.toStdString() ) ;
+    if( theItem==nullptr ){
+        error = string("no layout item uuid:'") + mapuuid.toStdString()+ "'." ;
+        return 13 ;
+    }
+    if( theItem->type() != QgsLayoutItemRegistry::ItemType::LayoutMap )
+    {
+        error = string("it is not layout map item for uuid:'") + mapuuid.toStdString()+ "'." ;
+        return 14 ;
+    }
+    QgsLayoutItemMap* map = dynamic_cast<QgsLayoutItemMap*> ( theItem ) ;
+
+    QString relPngFile = QString::fromStdString(relfilepath) + "_"
+            + QDate::currentDate().toString("yyyyMMdd")
+            + QTime::currentTime().toString("HHmmss") + "_"+mapuuid.mid(1,mapuuid.length()-2)+ ".png";
+    QString absoutputPngfile = m_pedir + relPngFile ;
+
+    // DRAW
+    string error2;
+    int ret2 = drawLayoutItemMapIntoPng(map,dpi,absoutputPngfile,error2 );
+    if( ret2!=0 ){
+        error = string("drawLayoutItemMapIntoPng failed:'") + error2+ "'." ;
+        return 15 ;
+    }
+    // ////////////////////////////////////
+
+    outJsonData = "{\"src\":\""+relPngFile.toStdString() +"\"}" ;
 
     return 0 ;
 }
@@ -1151,7 +1228,7 @@ int WMapComposer::projectZoom(QString& jsondata,string& outJsonData,string& erro
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout =getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1181,7 +1258,7 @@ int WMapComposer::projectZoom(QString& jsondata,string& outJsonData,string& erro
     cout<<"xmax:"<<mapRect.xMaximum()<<endl ;
     cout<<"ymin:"<<mapRect.yMinimum()<<endl ;
     cout<<"ymax:"<<mapRect.yMaximum()<<endl ;
-    mapitem->setExtent( mapRect );
+    mapitem->zoomToExtent( mapRect );
 
     // SAVE //////////////////////////////////
     bool wok = this->m_project->write() ;
@@ -1215,54 +1292,76 @@ int WMapComposer::layoutAddStyleLegend(QString& jsondata,string& outJsonData,str
     if( code1 != 0 ) return code1 ;
 
     if( jroot.contains("stylefile") == false ){
-        error = "empty stylefile." ;
+        error = "params no stylefile." ;
         return 21 ;
     }
     QString styleFile = jroot["stylefile"].toString() ;//相对.json路径
-    double left = 0;//jroot["left"].as<double>() ;
-    double top =  0;//jroot["top"].as<double>() ;
+    if( styleFile.length()==0 ){
+        error = "empty stylefile string." ;
+        return 22 ;
+    }
 
     // //////////////////////////////////////////////
-    QString fullstylefilepath = m_pedir + styleFile ;
-    //在style.json路径下生成 style.json.dpi72.png 的图片
-    //如果图片已有直接以图片的形式加进来，否则生成之。
-    //当执行export命令的时候，dpi使用用户输入的替换，规则一样，有则用之，没有生成之。
-
-    QString fullpngfilepath = fullstylefilepath + ".dpi72.png" ;
+    QString relStylePngFile = concatNewFilename( QString::fromStdString(relfilepath),
+                                                 styleFile,QString(".dpi72.png"));
+    QString relSpptFile = concatNewFilename( QString::fromStdString(relfilepath),
+                                             styleFile,QString(".sppt.json"));
+    QString absSpptFile = m_pedir + relSpptFile ;
+    {//创建默认PeStyle的渲染配置参数，并写入sppt.json文件
+        PeLegendRenderProperty spptObj;
+        ofstream spptOfs(absSpptFile.toStdString().c_str()) ;
+        if( spptOfs.is_open()){
+            spptOfs<<spptObj.toJsonString() ;
+            spptOfs.close();
+        }else{
+            error = "failed to write sppt file." ;
+            return 23 ;
+        }
+    }
+    QString fullstylefilename = m_pedir + styleFile ;
+    QString fullpngfilepath = m_pedir + relStylePngFile;
     QFile pngFile(fullpngfilepath) ;
     int pngWid = 0 ;
     int pngHei = 0 ;
-    if( pngFile.exists()==false ){
-        qDebug()<<"no style png file, make it...";
 
-        PeLegend pel ;
-        string pelError ;
-        int pelcode = pel.makePngByJsonFile(fullstylefilepath.toStdString()
-                              , fullpngfilepath.toStdString()
-                              , 72 , pelError ) ;
-        if( pelcode != 0 ){
-            qDebug()<<"make png failed: "<<pelcode<<". "<<pelError.c_str() ;
-            error = pelError ;
-            return 22 ;
-        }
-        qDebug()<<"make png ok." ;
-        pngWid = pel.outPngWid ;
-        pngHei = pel.outPngHei ;
-    }else{
-        qDebug()<<"has style png file." ;
+    PeLegend pel ;
+    string pelError ;
+    int pelcode = pel.makePngByJsonFile2(fullstylefilename.toStdString(),
+                                         absSpptFile.toStdString(),
+                                         fullpngfilepath.toStdString(),
+                                         72,
+                                         pelError);
+    if( pelcode != 0 ){
+        qDebug()<<"make png failed: "<<pelcode<<". "<<pelError.c_str() ;
+        error = pelError ;
+        return 22 ;
     }
-
+    qDebug()<<"make png ok." ;
+    pngWid = pel.outPngWid ;
+    pngHei = pel.outPngHei ;
     //add to layout
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
     }
 
+    double left = 0;
+    double top =  0;
+    {
+        cout<<"try to find legend_placeholder"<<endl ;
+        QgsLayoutItem* legendPlaceholder=findFirstLayoutItemOfLegendPlaceholder(layout);
+        if( legendPlaceholder!=nullptr){
+            left = legendPlaceholder->pos().x();
+            top = legendPlaceholder->pos().y();
+            cout<<"do find legend_placeholder left,top:"<<left<<","<<top<<endl ;
+        }
+    }
+
     QgsLayoutItemPicture* item = QgsLayoutItemPicture::create(layout) ;
     item->setPicturePath(fullpngfilepath);
-    item->setPos(left,top);
-    item->attemptResize(QgsLayoutSize(pngWid,pngHei));
+    item->attemptMove( QgsLayoutPoint(left,top));
+    item->attemptResize(QgsLayoutSize(pngWid,pngHei,QgsUnitTypes::LayoutPoints));
     item->setId( QString("style:")+styleFile );
     layout->addLayoutItem(item);
 
@@ -1367,7 +1466,7 @@ int WMapComposer::layoutAddRectEllArrow(string shapetype,QString& jsondata , str
 
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1466,7 +1565,7 @@ int WMapComposer::projectAddVec(QString& jsondata , string& outJsonData , string
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1525,7 +1624,7 @@ int WMapComposer::layoutDeleteItem(QString& jsondata,string&outJsonData,string&e
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout =getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -1587,6 +1686,38 @@ int WMapComposer::projectDeleteLayer(QString& jsondata,string&outJsonData,string
     outJsonData = "{\"lyrid\":\""+lyrid.toStdString()+"\"}" ;
 
     return 0 ;
+}
+
+
+/// 2022-9-18 draw one layoutItemMap into png
+int WMapComposer::drawLayoutItemMapIntoPng(QgsLayoutItemMap* liMap,
+                                           int dpi,
+                                           QString absPngfilename,
+                                           string& error)
+{
+
+    QgsPrintLayout* layout = static_cast<QgsPrintLayout*>(liMap->layout()) ;
+    QList<QgsLayoutItem*> loItems ;
+    layout->layoutItems(loItems) ;
+    QVector<bool> visVec ;
+    //hide all for render every single one.
+    for( QList<QgsLayoutItem*>::iterator  it = loItems.begin() ; it != loItems.end() ; ++ it )
+    {
+        bool vis = (*it)->isVisible() ;
+        visVec.push_back(vis);
+        (*it)->setVisibility(false);
+    }
+    liMap->setVisibility(true);
+    renderMapItem( (QgsLayoutItem*)liMap , absPngfilename.toStdString() , dpi , (QgsLayout*)layout ) ;
+    //restore all visibility for render every single one.
+    int ii = 0 ;
+    for( QList<QgsLayoutItem*>::iterator  it = loItems.begin() ; it != loItems.end() ; ++ it )
+    {
+        bool vis = visVec[ii] ;
+        ++ii ;
+        (*it)->setVisibility(vis);
+    }
+    return 0;
 }
 
 
@@ -1779,7 +1910,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         case QgsLayoutItemRegistry::ItemType::LayoutPicture:
         {
             QgsLayoutItemPicture* pic = (QgsLayoutItemPicture*)(*it) ;
-            if( lo_obj.value("loitype").toString().compare("north") )
+            if( lo_obj.value("loitype").toString().compare("north")==0 )
             {
                 QJsonObject dataJsonObj ;
                 if( pic->linkedMap()==nullptr ){
@@ -1788,7 +1919,23 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
                     dataJsonObj.insert("mapuuid" , pic->linkedMap()->uuid() ) ;
                 }
                 itemJsonObj.insert("data" , dataJsonObj) ;
-            }else{
+            }
+            else if( lo_obj.value("loitype").toString().compare("pestylelegend")==0 )
+            {
+                // PeStyle Legend
+                QString qgsfile=m_project->fileName() ;
+                QString styleFilename = (*it)->id().mid(6);
+                QString absSpptfilename =concatNewFilename(qgsfile,styleFilename,".sppt.json");
+                QJsonObject dataJsonObj ;
+                QString jsonError;
+                bool jsonOk = OmcJsonHelperTool::jsonFile2JsonObject(absSpptfilename,dataJsonObj,jsonError);
+                if(jsonOk==false){
+                    error = (QString("PeStyleLegend error:")+jsonError).toStdString() ;
+                    return 20;
+                }
+                itemJsonObj.insert("data" , dataJsonObj) ;
+            }
+            else{
                 QJsonObject dataJsonObj ;
                 QString picpath = pic->picturePath() ;
                 QString picrelpath = picpath.replace( m_pedir , "" ) ;
@@ -1885,10 +2032,8 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         }
 
         if( itemok==true ){
-
             renderMapItem( *it , absPngFile.toStdString() , dpi , (QgsLayout*)layout ) ;
             itemJsonObj.insert("png" , relPngFile ) ;
-
             layoutitemsArray.append( itemJsonObj );
         }
     }
@@ -1981,7 +2126,7 @@ int WMapComposer::projectExport(QString& jsondata , string& outJsonData ,string&
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -2026,7 +2171,7 @@ int WMapComposer::itemSetProperty(QString& jsondata,string&outJsonData,string&er
     // //////////////////////////////////////////////
 
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout =getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -2058,8 +2203,10 @@ int WMapComposer::itemSetProperty(QString& jsondata,string&outJsonData,string&er
         int ret2 = setLayoutItemLabel(item,jroot["data"].toObject(),error) ;
         if( ret2!=0 ) return ret2 ;
     }
-
-
+    else if( loitype.compare("pestylelegend")==0 ){
+        int ret2 = setLayoutItemPeStyleLegend(item,jroot["data"].toObject(),error);
+        if( ret2!=0)return ret2;
+    }
 
     // SAVE //////////////////////////////////
     bool wok = this->m_project->write() ;
@@ -2165,7 +2312,7 @@ int WMapComposer::layoutSetPage(QString& jsondata,string& outJsonData,string& er
 
     // //////////////////////////////////////////////
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -2225,7 +2372,7 @@ int WMapComposer::layoutExportImage(QString& jsondata,string& outJsonData,string
             + QTime::currentTime().toString("HHmmss") + "_dpi_"+QString::number(dpi)+ ".png";
     QString absoutputPngfile = m_pedir + outputPngFile ;
 
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout pointer." ;
         return 12 ;
@@ -2296,7 +2443,7 @@ int WMapComposer::layoutMakeThumb(QString& jsondata,string& outJsonData,string& 
 
     // //////////////////////////////////////////////
     QString absoutputPngfile = m_pedir + QString::fromStdString( outrelfilepath ) ;
-    QgsPrintLayout* layout = (QgsPrintLayout*)this->m_project->layoutManager()->layoutByName("1") ;
+    QgsPrintLayout* layout = getFirstLayout(this->m_project) ;
     if( layout==nullptr ){
         error = "failed to get layout('1') pointer." ;
         return 12 ;
@@ -2478,7 +2625,11 @@ QJsonObject WMapComposer::extractLayoutItemData( QgsLayoutItem* item)
         {
             obj.insert("loitype" , QJsonValue("north") );
         }else{
-            obj.insert("loitype" , QJsonValue("image") );
+            if( item->id().left(6).compare("style:")==0 ){
+                obj.insert("loitype", QJsonValue("pestylelegend") );
+            }else{
+                obj.insert("loitype" , QJsonValue("image") );
+            }
         }
     } break ;
     case QgsLayoutItemRegistry::ItemType::LayoutLabel:
@@ -2831,6 +2982,54 @@ int WMapComposer::setLayoutItemShape(QgsLayoutItem* item ,const QJsonObject& job
     return 0 ;
 }
 
+int WMapComposer::setLayoutItemPeStyleLegend(QgsLayoutItem* item ,const QJsonObject& jobj,string& error)
+{
+    QgsLayoutItemPicture* pic = dynamic_cast<QgsLayoutItemPicture*>(item) ;
+    if( pic==nullptr ) {
+        error = "invalid PeStyleLegend of QgsLayoutItemPicture" ;
+        return 20 ;
+    }
+    QString tailname = QString(".dpi") + QString::number(72) + ".png" ;
+    QString tailname1 = QString(".dpi") + QString::number(72) + "-1.png" ;
+    if( pic->id().left(6).compare("style:")==0 ){
+        QString relJsonFile = pic->id().mid(6) ;
+        QString fullJsonFile = m_pedir + relJsonFile ;
+        QString qgsfile = m_project->fileName();
+        QString fullPngDpiFile = concatNewFilename( qgsfile, relJsonFile, tailname) ;
+        QString fullPngDpiFile1 = concatNewFilename( qgsfile, relJsonFile, tailname1) ;
+        QString spptFilename = concatNewFilename(qgsfile, relJsonFile, ".sppt.json") ;
+        //rewrite sppt json file.
+        QString error2;
+        bool spptOk = OmcJsonHelperTool::writeJsonObjectIntoTextfile(jobj,spptFilename,error2);
+        if( spptOk==false ){
+            error = string("OmcJsonHelperTool::writeJsonObjectIntoTextfile failed:")+error2.toStdString();
+            return 21 ;
+        }
+        QString usePngFilename = fullPngDpiFile ;
+        if(pic->picturePath().compare(fullPngDpiFile)==0){
+            usePngFilename = fullPngDpiFile1 ;
+        }
+        PeLegend pel ;
+        string pelError ;
+        int pelcode = pel.makePngByJsonFile2(
+                    fullJsonFile.toStdString(),
+                    spptFilename.toStdString(),
+                    usePngFilename.toStdString(),
+                    72 ,
+                    pelError) ;
+        if( pelcode!=0 ){
+            error = string("pel.makePngByJsonFile2 failed:")+pelError ;
+            return 22 ;
+        }else{
+            pel.outPngWid;
+            qDebug()<<"making good." ;
+            pic->setPicturePath(usePngFilename);
+            pic->attemptResize(QgsLayoutSize(pel.outPngWid,pel.outPngHei,QgsUnitTypes::LayoutPoints));
+        }
+    }
+    return 0 ;
+}
+
 int WMapComposer::extractVecLayerPointSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error)
 {
     QgsFeatureRenderer* renderer = layer->renderer() ;
@@ -3172,6 +3371,7 @@ QgsLayoutItemMap* WMapComposer::findFirstLayoutItemMap(QgsLayout* layout)
 }
 
 //2022-5-30
+//2022-9-22
 void WMapComposer::updateStyleLegendImagesByDpi(QgsPrintLayout* layout,int dpi)
 {
     QString tailname = QString(".dpi") + QString::number(dpi) + ".png" ;
@@ -3181,33 +3381,65 @@ void WMapComposer::updateStyleLegendImagesByDpi(QgsPrintLayout* layout,int dpi)
     {
         if( (*it)->type() == QgsLayoutItemRegistry::ItemType::LayoutPicture ) {
             QgsLayoutItemPicture* picture = (QgsLayoutItemPicture*)(*it) ;
-            if( picture->id().length() > 6 ){
-                QString prefix = picture->id().left(6) ;
-                if( prefix.compare("style:") == 0 )
-                {
-                    QString relJsonFile = picture->id().mid(6) ;
-                    QString fullJsonFile = m_pedir + relJsonFile ;
-                    QString fullPngDpiFile = fullJsonFile + tailname ;
-                    QFile pngFileObj(fullPngDpiFile) ;
-                    if( pngFileObj.exists()==true ){
-                        picture->setPicturePath(fullPngDpiFile);
+            if( picture->id().left(6).compare("style:")==0 ){
+                QString relJsonFile = picture->id().mid(6) ;
+                QString fullJsonFile = m_pedir + relJsonFile ;
+                QString qgsfile = m_project->fileName();
+                QString fullPngDpiFile = concatNewFilename( qgsfile, relJsonFile,tailname) ;
+                QString spptFilename = concatNewFilename(qgsfile, relJsonFile, ".sppt.json") ;
+                QFile pngFileObj(fullPngDpiFile) ;
+                if( pngFileObj.exists()==true ){
+                    picture->setPicturePath(fullPngDpiFile);
+                }else{
+                    qDebug()<<"making new png "<<fullPngDpiFile ;
+                    PeLegend pel ;
+                    string pelError ;
+                    int pelcode = pel.makePngByJsonFile2(
+                                fullJsonFile.toStdString(),
+                                spptFilename.toStdString(),
+                                fullPngDpiFile.toStdString(),
+                                dpi ,
+                                pelError) ;
+                    if( pelcode!=0 ){
+                        qDebug()<<"making failed:"<<pelcode<<" , "<<pelError.c_str() ;
                     }else{
-                        qDebug()<<"making new png "<<fullPngDpiFile ;
-                        PeLegend pel ;
-                        string pelError ;
-                        int pelcode = pel.makePngByJsonFile(fullJsonFile.toStdString()
-                                                            , fullPngDpiFile.toStdString()
-                                                            , dpi , pelError) ;
-                        if( pelcode!=0 ){
-                            qDebug()<<"making failed:"<<pelcode<<" , "<<pelError.c_str() ;
-                        }else{
-                            qDebug()<<"making good." ;
-                            picture->setPicturePath(fullPngDpiFile);
-                        }
+                        qDebug()<<"making good." ;
+                        picture->setPicturePath(fullPngDpiFile);
                     }
-
                 }
             }
         }
     }
+}
+
+QgsPrintLayout* WMapComposer::getFirstLayout(QgsProject* prj)
+{
+    if( prj!=nullptr && prj->layoutManager()->layouts().size()>0 ){
+        QgsPrintLayout* layout = (QgsPrintLayout*)prj->layoutManager()->layouts()[0] ;
+        return layout ;
+    }else{
+        return nullptr;
+    }
+}
+
+
+QString WMapComposer::concatNewFilename(QString  part1 , QString  part2, QString part3 )
+{
+    QFileInfo part2info(part2);
+    QString basename = part2info.baseName();
+    QString res = part1 + "-" + basename + part3;
+    return res;
+}
+
+QgsLayoutItem* WMapComposer::findFirstLayoutItemOfLegendPlaceholder(QgsLayout* layout)
+{
+    QList<QgsLayoutItem*> itemList ;
+    layout->layoutItems( itemList ) ;
+    for(auto it = itemList.begin() ; it != itemList.end() ; ++ it )
+    {
+        if( (*it)->id().compare("legend_placeholder")==0 ) {
+            return (*it) ;
+        }
+    }
+    return nullptr ;
 }

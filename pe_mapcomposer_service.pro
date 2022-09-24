@@ -31,7 +31,9 @@ SOURCES += main.cpp \
     ../sharedcodes/wstringutils.cpp \
     helperfunctions.cpp \
     ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegend.cpp \
-    ../sharedcodes/wdirtools.cpp
+    ../sharedcodes/wdirtools.cpp \
+    ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegendrenderproperty.cpp \
+    omcjsonhelpertool.cpp
 
 
 HEADERS += \
@@ -53,7 +55,9 @@ HEADERS += \
     ../sharedcodes/wstringutils.h \
     helperfunctions.h \
     ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegend.h \
-    ../sharedcodes/wdirtools.h
+    ../sharedcodes/wdirtools.h \
+    ../PixelEngine_TileCompute/pe_tilecompute/pelegend/pelegendrenderproperty.h \
+    omcjsonhelpertool.h
 
 
 #QGIS

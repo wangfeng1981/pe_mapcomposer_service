@@ -2,6 +2,10 @@
 /// 在线作图后台程序 2022-4-13
 /// 使用http POST 服务模拟一个RPC 参数为两个一个method字符串类型，一个jsondata是转为字符串的json对象
 /// 返回信息统一使用json {state:0 , message:'may some error msg' , data:{...} }
+/// 2022-9-22 关于qgis模版的一些说明：
+/// 1.添加图层，检查qgs图层列表是否有名称为placeholder的group，有的话加到group里面，反之正常添加图层即可。
+/// 2.添加pestyle图例，检查layout元素列表是否有ItemID命名为 legend_placeholder 的元素(一般使用Rectangle作为占位元素)，
+///   如果有的话就插入到这个元素的左上角坐标。反之就是插入0，0坐标。
 
 
 #define _USE_MATH_DEFINES // for C++
@@ -150,19 +154,21 @@ int main(int argc, char *argv[])
     cout<<"usage: pe_mapcomposer_service task17config.json"<<endl ;
     cout<<"A4 page export dpi72 has 841x595 pixels."<<endl ;
     cout<<"This program will create oms_out dir under pedir for output jsons and pngs."<<endl ;
-    cout<<"v0.0.0 created."<<endl ;
-    cout<<"v0.0.1 "<<endl ;
-    cout<<"v0.0.3 2022-4-16"<<endl ;
-    cout<<"v0.0.4 2022-4-17"<<endl ;
-    cout<<"v0.0.6 addmap x0,x1,y0,y1 2022-4-19"<<endl ;
-    cout<<"v0.0.7 2022-4-21"<<endl ;
-    cout<<"v0.0.9 2022-4-25 add crs list for MapItem"<<endl ;
-    cout<<"v0.0.10.1 2022-4-27 map pos and size."<<endl ;
-    cout<<"v0.0.11r 2022-4-27"<<endl ;
-    cout<<"v0.1.0.1 2022-5-24 new from template;add layer group; spdlog."<<endl ;
-    cout<<"v0.1.1.0 2022-5-27 project.zoom."<<endl ;
-    cout<<"v0.1.2.1 2022-5-30 stylelegend."<<endl ;
-    cout<<"v0.1.2.2 2022-5-31 commit."<<endl ;
+    cout<<"version:"<<endl;
+//    cout<<"v0.0.0 created."<<endl ;
+//    cout<<"v0.0.1 "<<endl ;
+//    cout<<"v0.0.3 2022-4-16"<<endl ;
+//    cout<<"v0.0.4 2022-4-17"<<endl ;
+//    cout<<"v0.0.6 addmap x0,x1,y0,y1 2022-4-19"<<endl ;
+//    cout<<"v0.0.7 2022-4-21"<<endl ;
+//    cout<<"v0.0.9 2022-4-25 add crs list for MapItem"<<endl ;
+//    cout<<"v0.0.10.1 2022-4-27 map pos and size."<<endl ;
+//    cout<<"v0.0.11r 2022-4-27"<<endl ;
+//    cout<<"v0.1.0.1 2022-5-24 new from template;add layer group; spdlog."<<endl ;
+//    cout<<"v0.1.1.0 2022-5-27 project.zoom."<<endl ;
+//    cout<<"v0.1.2.1 2022-5-30 stylelegend."<<endl ;
+//    cout<<"v0.1.2.2 2022-5-31 commit."<<endl ;
+    cout<<"v0.2.0.10d 2022-9-15 update pestyle render."<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
@@ -209,10 +215,6 @@ int main(int argc, char *argv[])
 
     g_httpPort = httpPort.toInt() ;
     g_zmqPort = zmqPort.toInt() ;
-
-
-
-
 
     WMapComposer mapComposer(peDir , resDir ) ;
 

@@ -55,13 +55,15 @@
 #include <QDate>
 #include <QTime>
 #include <QDateTime>
-
-
+#include <fstream>
+#include <QJsonParseError>
+#include <QJsonDocument>
 #include "helperfunctions.h"
 
 #include "spdlog/spdlog.h"
 
 #include "pelegend.h" ;
+#include "omcjsonhelpertool.h"
 
 using namespace std;
 using namespace ArduinoJson;
@@ -154,6 +156,9 @@ public:
     /// 2022-5-27 file,left,right,top,bottom,mapuuid(optional)
     int projectZoom(QString& jsondata,string& outJsonData,string& error) ;
 
+    //2022-9-18
+    int mapSetExtentAndDraw(QString& jsondata,string& outJsonData,string& error);
+
     /// one method one line...
     string getMethodAPIs() ;
 
@@ -179,6 +184,8 @@ private:
     /// outfileroot is relfilepath will be add {outfileroot}{-{index}}.png
     int exportProjectJsonFile( QgsPrintLayout* layout, QString reloutfilenameroot,int dpi,string& outjsondata, string& error) ;
 
+    /// 2022-9-18 draw one layoutItemMap into png
+    int drawLayoutItemMapIntoPng(QgsLayoutItemMap* liMap,int dpi,QString absPngfilename,string& error);
 
     ///
     QJsonObject extractLayoutItemData( QgsLayoutItem* item) ;
@@ -214,6 +221,7 @@ private:
     int setLayoutItemMapData(QgsLayoutItem* item,const QJsonObject& jobj, string& error) ;
     int setLayoutItemLabel(QgsLayoutItem* item,const QJsonObject& jobj,string& error) ;
     int setLayoutItemShape(QgsLayoutItem* item ,const QJsonObject& jobj,string& error) ;
+    int setLayoutItemPeStyleLegend(QgsLayoutItem* item ,const QJsonObject& jobj,string& error);
 
     int extractVecLayerPointSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error) ;
     int extractVecLayerLineSymbol(QgsVectorLayer* layer,QJsonObject& retdataobj,string& error) ;
@@ -229,6 +237,12 @@ private:
     //2022-5-30 检查layout中的style:xxx.json item，然后使用dpi的图片进行替换source
     void updateStyleLegendImagesByDpi(QgsPrintLayout* layout,int dpi) ;
 
+    //if no, return nullptr
+    QgsPrintLayout* getFirstLayout(QgsProject* prj) ;
+    //make new filename by 3 parts, part2 only use its baseName.
+    QString concatNewFilename(QString  part1 , QString  part2, QString part3 );
+    //get item id is 'legend_placeholder', if not return null.
+    QgsLayoutItem* findFirstLayoutItemOfLegendPlaceholder(QgsLayout* layout);
 };
 
 #endif // WMAPCOMPOSER_H
