@@ -1181,6 +1181,12 @@ int WMapComposer::mapSetExtentAndDraw(QString& jsondata,
         return 15 ;
     }
     // ////////////////////////////////////
+    QString flistError;
+    QString flistFilename = OmcJsonHelperTool::makeQgisFlistFilename(m_project->fileName());
+    bool flistOk = OmcJsonHelperTool::appendFileIntoFlistFile(absoutputPngfile,flistFilename,flistError);
+    if(flistOk==false){
+        qDebug()<<flistError ;
+    }
 
     outJsonData = "{\"src\":\""+relPngFile.toStdString() +"\"}" ;
 
@@ -1725,12 +1731,20 @@ int WMapComposer::drawLayoutItemMapIntoPng(QgsLayoutItemMap* liMap,
 
 
 //
-int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutfilenameroot,int dpi, string& outJsonData, string& error)
+int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutfilenameroot,
+                                         int dpi, string& outJsonData, string& error)
 {
     if( m_project==nullptr ){
         error = "empty project." ;
         return 0 ;
     }
+    QString flistFilename = OmcJsonHelperTool::makeQgisFlistFilename(m_project->fileName()) ;
+    QString flistError;
+    bool flistOk = OmcJsonHelperTool::removeFilesFromFlistFile(flistFilename,flistError) ;
+    if( flistOk==false ){
+        qDebug()<<flistError ;
+    }
+
 
     //theme
     QJsonArray themeArrJson ;
@@ -1858,7 +1872,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     {
         (*it)->setVisibility(false);
     }
-
+    QStringList filenameList;
     for(auto it = loItems.begin(); it != loItems.end(); ++ it )
     {
         ++ loiIndex ;
@@ -1930,9 +1944,21 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
                 QString jsonError;
                 bool jsonOk = OmcJsonHelperTool::jsonFile2JsonObject(absSpptfilename,dataJsonObj,jsonError);
                 if(jsonOk==false){
-                    error = (QString("PeStyleLegend error:")+jsonError).toStdString() ;
-                    return 20;
+                    qDebug()<<"Warning losing sppt file, it will create a default one.";
+                    PeLegendRenderProperty spptObj ;
+                    QString newJsonStr = QString::fromStdString(spptObj.toJsonString());
+                    jsonOk = OmcJsonHelperTool::jsonStr2JsonObject( newJsonStr,dataJsonObj,jsonError);
+                    if( jsonOk==false ){
+                        error = "Error, failed to build jsonObject from str." ;
+                        return 20;
+                    }
+                    jsonOk = OmcJsonHelperTool::writeJsonObjectIntoTextfile(dataJsonObj,absSpptfilename,jsonError);
+                    if( jsonOk==false){
+                        error = "Error, failed to recreate sppt file." ;
+                        return 21;
+                    }
                 }
+
                 itemJsonObj.insert("data" , dataJsonObj) ;
             }
             else{
@@ -2034,6 +2060,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
         if( itemok==true ){
             renderMapItem( *it , absPngFile.toStdString() , dpi , (QgsLayout*)layout ) ;
             itemJsonObj.insert("png" , relPngFile ) ;
+            filenameList.append(absPngFile);
             layoutitemsArray.append( itemJsonObj );
         }
     }
@@ -2076,6 +2103,7 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     projJsonObj.insert("theme_array", themeArrJson ) ;
 
 
+
     QJsonDocument jdoc( projJsonObj ) ;
 
     QByteArray bytes = jdoc.toJson( QJsonDocument::Compact ) ;
@@ -2093,6 +2121,11 @@ int WMapComposer::exportProjectJsonFile( QgsPrintLayout* layout, QString reloutf
     {
         error = "failed to open absProjFile for writing." ;
         return 13;
+    }
+    filenameList.append(absProjFile);
+    flistOk = OmcJsonHelperTool::writeFilesIntoFlistFile(filenameList, flistFilename,flistError);
+    if( flistOk==false ){
+        qDebug()<<flistError ;
     }
 
     outJsonData = "{\"projfile\":\""+relProjFile.toStdString()+"\"}" ;

@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 //    cout<<"v0.1.1.0 2022-5-27 project.zoom."<<endl ;
 //    cout<<"v0.1.2.1 2022-5-30 stylelegend."<<endl ;
 //    cout<<"v0.1.2.2 2022-5-31 commit."<<endl ;
-    cout<<"v0.2.0.10d 2022-9-15 update pestyle render."<<endl ;
+    cout<<"v0.2.0.11 2022-9-24 update pestyle render."<<endl ;
 
     const string PROJ_DIR = "/usr/share/gdal/2.2" ;
     QDir currdir = QDir::currentPath() ;
